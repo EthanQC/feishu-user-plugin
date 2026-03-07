@@ -6,33 +6,78 @@
 
 **English** | [中文](README_CN.md)
 
-**Send Feishu/Lark messages as YOUR personal identity — not a bot.**
+**All-in-one Feishu/Lark MCP Server — 27 tools for messaging, docs, tables, wiki, and drive.**
 
-An MCP server that reverse-engineers Feishu's internal Protobuf protocol, enabling Claude Code and other AI tools to send messages, search contacts, and manage chats as the real you.
+The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API for documents, spreadsheets, wikis, and more.
 
 ## Why This Exists
 
-Feishu's official API has a hard limitation: **there is no `send_as_user` scope**. Even with `user_access_token` (OAuth), messages still show `sender_type: "app"` — they come from your app, not from you.
+Feishu's official API has a hard limitation: **there is no `send_as_user` scope**. Even with `user_access_token` (OAuth), messages still show `sender_type: "app"`.
 
-This project bypasses that limitation entirely by using the same internal protocol that Feishu's web client uses.
+This project combines two approaches into one plugin:
 
 ```
-Official API:  You → Bot App → Feishu (messages show as bot)
-This project:  You → Cookie Auth → Feishu (messages show as YOU)
+User Identity (cookie):     You → Protobuf → Feishu (messages show as YOU)
+Official API  (app token):  You → REST API → Feishu (docs, tables, wiki, drive)
 ```
 
-## Tools (8 total)
+**One plugin. Everything Feishu. No other MCP needed.**
 
+## Tools (27 total)
+
+### User Identity (reverse-engineered protocol)
 | Tool | Description |
 |------|-------------|
-| `send_to_user` | Search user by name + send message — one step |
-| `send_to_group` | Search group by name + send message — one step |
-| `send_as_user` | Send message to any chat by ID |
-| `search_contacts` | Search users, bots, and groups |
-| `create_p2p_chat` | Create/get a direct message chat |
-| `get_chat_info` | Get group details (name, members, owner) |
-| `get_user_info` | Look up a user's display name |
-| `get_login_status` | Check if your session is still valid |
+| `send_to_user` | Search user + send message — one step |
+| `send_to_group` | Search group + send message — one step |
+| `send_as_user` | Send to any chat by ID |
+| `search_contacts` | Search users, bots, groups |
+| `create_p2p_chat` | Create/get direct message chat |
+| `get_chat_info` | Group details (name, members, owner) |
+| `get_user_info` | User display name lookup |
+| `get_login_status` | Check session status |
+
+### IM — Official API
+| Tool | Description |
+|------|-------------|
+| `list_chats` | List all chats the bot joined |
+| `read_messages` | Read message history from a chat |
+| `reply_message` | Reply to a specific message |
+| `forward_message` | Forward message to another chat |
+
+### Documents — Official API
+| Tool | Description |
+|------|-------------|
+| `search_docs` | Search documents by keyword |
+| `read_doc` | Read document content |
+| `create_doc` | Create new document |
+
+### Bitable (Spreadsheets) — Official API
+| Tool | Description |
+|------|-------------|
+| `list_bitable_tables` | List tables in a Bitable app |
+| `list_bitable_fields` | List columns in a table |
+| `search_bitable_records` | Query records with filter/sort |
+| `create_bitable_record` | Create new record |
+| `update_bitable_record` | Update existing record |
+
+### Wiki — Official API
+| Tool | Description |
+|------|-------------|
+| `list_wiki_spaces` | List accessible wiki spaces |
+| `search_wiki` | Search wiki nodes |
+| `list_wiki_nodes` | Browse wiki node tree |
+
+### Drive — Official API
+| Tool | Description |
+|------|-------------|
+| `list_files` | List files in a folder |
+| `create_folder` | Create new folder |
+
+### Contact — Official API
+| Tool | Description |
+|------|-------------|
+| `find_user` | Find user by email or mobile |
 
 ## Installation
 
@@ -76,8 +121,21 @@ const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
 
 ```bash
 cp .env.example .env
-# Edit .env and paste your cookie string after LARK_COOKIE=
 ```
+
+Edit `.env` with your credentials:
+
+```env
+# User identity messaging (reverse-engineered)
+LARK_COOKIE=paste_your_cookie_here
+
+# Official API (docs, tables, wiki, drive)
+# Create app at https://open.feishu.cn → App ID & Secret
+LARK_APP_ID=cli_xxxxx
+LARK_APP_SECRET=xxxxx
+```
+
+> **Note**: Cookie is required for user-identity messaging. App credentials are required for docs/tables/wiki. You can configure either or both.
 
 ### 4. Verify
 
@@ -188,15 +246,20 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 
 ## Claude Code Skills
 
-This repo includes ready-to-use [slash commands](https://docs.anthropic.com/en/docs/claude-code/tutorials#create-custom-slash-commands) in `.claude/commands/`:
+This repo includes 8 ready-to-use [slash commands](https://docs.anthropic.com/en/docs/claude-code/tutorials#create-custom-slash-commands) in `.claude/commands/`:
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
-| `/send` | `/send 张三: 明天下午3点开会` | Send message to a user |
+| `/send` | `/send 张三: 明天下午3点开会` | Send message as yourself |
+| `/reply` | `/reply 工坊群` | Read messages and reply |
+| `/digest` | `/digest 工坊群 7` | Digest recent chat messages |
 | `/search` | `/search 技术` | Search contacts and groups |
+| `/doc` | `/doc search MCP` | Search/read/create documents |
+| `/table` | `/table query appXxx` | Query/create Bitable records |
+| `/wiki` | `/wiki search 协议` | Search/browse wiki |
 | `/status` | `/status` | Check login status |
 
-To use these skills, either clone this repo as your project or copy `.claude/commands/` into your own project.
+To use, copy `.claude/commands/` into your project.
 
 ## How It Works
 
@@ -244,15 +307,17 @@ Based on protocol research from [cv-cat/LarkAgentX](https://github.com/cv-cat/La
 ```
 feishu-user-mcp/
 ├── src/
-│   ├── index.js        # MCP server (8 tools)
-│   ├── client.js       # LarkUserClient — Protobuf gateway
+│   ├── index.js        # MCP server entry (27 tools)
+│   ├── client.js       # User identity client (Protobuf)
+│   ├── official.js     # Official API client (REST)
 │   ├── utils.js        # ID generators, cookie parser
 │   └── test-send.js    # CLI test tool
 ├── proto/
 │   └── lark.proto      # Protobuf message definitions
 ├── .claude/
-│   └── commands/       # Claude Code slash commands
+│   └── commands/       # 8 Claude Code skills
 ├── CLAUDE.md           # AI project instructions
+├── server.json         # MCP Registry manifest
 ├── .env.example        # Configuration template
 └── package.json
 ```

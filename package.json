@@ -1,7 +1,7 @@
 {
   "name": "feishu-user-mcp",
-  "version": "0.2.0",
-  "description": "Feishu/Lark MCP Server — send messages as YOUR identity, not a bot. Reverse-engineered Protobuf protocol.",
+  "version": "0.3.0",
+  "description": "All-in-one Feishu/Lark MCP Server — user identity messaging + official API (docs, tables, wiki, drive). 27 tools.",
   "main": "src/index.js",
   "bin": {
     "feishu-user-mcp": "src/index.js"
@@ -32,6 +32,7 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "dotenv": "^16.4.7",
     "protobufjs": "^7.4.0"
