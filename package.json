@@ -1,7 +1,7 @@
 {
   "name": "feishu-user-mcp",
-  "version": "0.3.0",
-  "description": "All-in-one Feishu/Lark MCP Server — user identity messaging + official API (docs, tables, wiki, drive). 27 tools.",
+  "version": "0.4.0",
+  "description": "All-in-one Feishu/Lark MCP Server — user identity messaging (text, image, file, post, sticker, audio) + official API (docs, tables, wiki, drive). 33 tools.",
   "main": "src/index.js",
   "bin": {
     "feishu-user-mcp": "src/index.js"

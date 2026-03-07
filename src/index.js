@@ -10,10 +10,54 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { LarkUserClient } = require('./client');
 const { LarkOfficialClient } = require('./official');
 
+// --- Chat ID Mapper ---
+
+class ChatIdMapper {
+  constructor() {
+    this.nameCache = new Map(); // oc_id → chat name
+    this.lastRefresh = 0;
+    this.TTL = 5 * 60 * 1000; // 5 min cache
+  }
+
+  async _refresh(official) {
+    if (Date.now() - this.lastRefresh < this.TTL) return;
+    try {
+      const chats = await official.listAllChats();
+      this.nameCache.clear();
+      for (const chat of chats) {
+        this.nameCache.set(chat.chat_id, chat.name || '');
+      }
+      this.lastRefresh = Date.now();
+    } catch (e) {
+      console.error('[feishu-user-mcp] ChatIdMapper refresh failed:', e.message);
+    }
+  }
+
+  async findByName(name, official) {
+    await this._refresh(official);
+    // Exact match first
+    for (const [ocId, chatName] of this.nameCache) {
+      if (chatName === name) return ocId;
+    }
+    // Partial match
+    for (const [ocId, chatName] of this.nameCache) {
+      if (chatName && chatName.includes(name)) return ocId;
+    }
+    return null;
+  }
+
+  async resolveToOcId(chatIdOrName, official) {
+    if (chatIdOrName.startsWith('oc_')) return chatIdOrName;
+    // Try as chat name
+    return this.findByName(chatIdOrName, official);
+  }
+}
+
 // --- Client Singletons ---
 
 let userClient = null;
 let officialClient = null;
+const chatIdMapper = new ChatIdMapper();
 
 async function getUserClient() {
   if (userClient) return userClient;
@@ -28,7 +72,7 @@ function getOfficialClient() {
   if (officialClient) return officialClient;
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
-  if (!appId || !appSecret) throw new Error('LARK_APP_ID and LARK_APP_SECRET not set. Required for docs/tables/wiki operations.');
+  if (!appId || !appSecret) throw new Error('LARK_APP_ID and LARK_APP_SECRET not set.');
   officialClient = new LarkOfficialClient(appId, appSecret);
   return officialClient;
 }
@@ -36,22 +80,24 @@ function getOfficialClient() {
 // --- Tool Definitions ---
 
 const TOOLS = [
-  // ========== User Identity (reverse-engineered) ==========
+  // ========== User Identity — Send Messages ==========
   {
     name: 'send_as_user',
-    description: '[User Identity] Send a message as the logged-in Feishu user (not a bot). Messages appear from YOUR personal account.',
+    description: '[User Identity] Send a text message as the logged-in Feishu user. Supports reply threading.',
     inputSchema: {
       type: 'object',
       properties: {
-        chat_id: { type: 'string', description: 'Target chat ID. Get from search_contacts or create_p2p_chat.' },
-        text: { type: 'string', description: 'Message text to send' },
+        chat_id: { type: 'string', description: 'Target chat ID (numeric)' },
+        text: { type: 'string', description: 'Message text' },
+        root_id: { type: 'string', description: 'Thread root message ID (for reply, optional)' },
+        parent_id: { type: 'string', description: 'Parent message ID (for nested reply, optional)' },
       },
       required: ['chat_id', 'text'],
     },
   },
   {
     name: 'send_to_user',
-    description: '[User Identity] Search user by name → create P2P chat → send message. All in one step.',
+    description: '[User Identity] Search user by name → create P2P chat → send text message. All in one step.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -63,7 +109,7 @@ const TOOLS = [
   },
   {
     name: 'send_to_group',
-    description: '[User Identity] Search group by name → send message. All in one step.',
+    description: '[User Identity] Search group by name → send text message. All in one step.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -74,8 +120,80 @@ const TOOLS = [
     },
   },
   {
+    name: 'send_image_as_user',
+    description: '[User Identity] Send an image as the logged-in user. Requires image_key (upload via Official API first).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat ID' },
+        image_key: { type: 'string', description: 'Image key from upload (img_v2_xxx or img_v3_xxx)' },
+        root_id: { type: 'string', description: 'Thread root message ID (optional)' },
+      },
+      required: ['chat_id', 'image_key'],
+    },
+  },
+  {
+    name: 'send_file_as_user',
+    description: '[User Identity] Send a file as the logged-in user. Requires file_key (upload via Official API first).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat ID' },
+        file_key: { type: 'string', description: 'File key from upload' },
+        file_name: { type: 'string', description: 'Display file name' },
+        root_id: { type: 'string', description: 'Thread root message ID (optional)' },
+      },
+      required: ['chat_id', 'file_key', 'file_name'],
+    },
+  },
+  {
+    name: 'send_sticker_as_user',
+    description: '[User Identity] Send a sticker/emoji as the logged-in user.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat ID' },
+        sticker_id: { type: 'string', description: 'Sticker ID' },
+        sticker_set_id: { type: 'string', description: 'Sticker set ID' },
+      },
+      required: ['chat_id', 'sticker_id', 'sticker_set_id'],
+    },
+  },
+  {
+    name: 'send_post_as_user',
+    description: '[User Identity] Send a rich text (POST) message with title and formatted paragraphs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat ID' },
+        title: { type: 'string', description: 'Post title (optional)' },
+        paragraphs: {
+          type: 'array',
+          description: 'Array of paragraphs. Each paragraph is an array of elements: {tag:"text",text:"..."} or {tag:"a",href:"...",text:"..."} or {tag:"at",userId:"..."}',
+          items: { type: 'array', items: { type: 'object' } },
+        },
+        root_id: { type: 'string', description: 'Thread root message ID (optional)' },
+      },
+      required: ['chat_id', 'paragraphs'],
+    },
+  },
+  {
+    name: 'send_audio_as_user',
+    description: '[User Identity] Send an audio message as the logged-in user. Requires audio_key.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat ID' },
+        audio_key: { type: 'string', description: 'Audio key from upload' },
+      },
+      required: ['chat_id', 'audio_key'],
+    },
+  },
+
+  // ========== User Identity — Contacts & Info ==========
+  {
     name: 'search_contacts',
-    description: '[User Identity] Search Feishu users, bots, or group chats by name. Returns IDs for other tools.',
+    description: '[User Identity] Search Feishu users, bots, or group chats by name. Returns IDs.',
     inputSchema: {
       type: 'object',
       properties: { query: { type: 'string', description: 'Search keyword' } },
@@ -84,7 +202,7 @@ const TOOLS = [
   },
   {
     name: 'create_p2p_chat',
-    description: '[User Identity] Create or get a P2P (direct message) chat. Returns chat_id.',
+    description: '[User Identity] Create or get a P2P (direct message) chat. Returns numeric chat_id.',
     inputSchema: {
       type: 'object',
       properties: { user_id: { type: 'string', description: 'Target user ID from search_contacts' } },
@@ -93,7 +211,7 @@ const TOOLS = [
   },
   {
     name: 'get_chat_info',
-    description: '[User Identity] Get chat details: name, description, member count, owner, etc.',
+    description: '[User Identity] Get chat details: name, description, member count, owner.',
     inputSchema: {
       type: 'object',
       properties: { chat_id: { type: 'string', description: 'Chat ID' } },
@@ -114,7 +232,7 @@ const TOOLS = [
   },
   {
     name: 'get_login_status',
-    description: 'Check if both cookie session and app credentials are valid.',
+    description: 'Check cookie session validity and app credentials status. Also refreshes session.',
     inputSchema: { type: 'object', properties: {} },
   },
 
@@ -132,11 +250,11 @@ const TOOLS = [
   },
   {
     name: 'read_messages',
-    description: '[Official API] Read message history from a chat. Returns sender, content, timestamps.',
+    description: '[Official API] Read message history. Accepts oc_xxx ID or chat name (auto-resolved).',
     inputSchema: {
       type: 'object',
       properties: {
-        chat_id: { type: 'string', description: 'Chat ID (use open chat ID like oc_xxx)' },
+        chat_id: { type: 'string', description: 'Chat ID (oc_xxx) or chat name (auto-searched)' },
         page_size: { type: 'number', description: 'Messages to fetch (default 20, max 50)' },
         start_time: { type: 'string', description: 'Start timestamp in seconds (optional)' },
         end_time: { type: 'string', description: 'End timestamp in seconds (optional)' },
@@ -146,7 +264,7 @@ const TOOLS = [
   },
   {
     name: 'reply_message',
-    description: '[Official API] Reply to a specific message by message_id.',
+    description: '[Official API] Reply to a specific message by message_id (as bot).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -225,7 +343,7 @@ const TOOLS = [
   },
   {
     name: 'search_bitable_records',
-    description: '[Official API] Search/query records in a Bitable table with optional filter and sort.',
+    description: '[Official API] Search/query records in a Bitable table.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -288,7 +406,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         space_id: { type: 'string', description: 'Wiki space ID' },
-        parent_node_token: { type: 'string', description: 'Parent node token (optional, for sub-nodes)' },
+        parent_node_token: { type: 'string', description: 'Parent node token (optional)' },
       },
       required: ['space_id'],
     },
@@ -300,9 +418,7 @@ const TOOLS = [
     description: '[Official API] List files in a Drive folder.',
     inputSchema: {
       type: 'object',
-      properties: {
-        folder_token: { type: 'string', description: 'Folder token (empty for root)' },
-      },
+      properties: { folder_token: { type: 'string', description: 'Folder token (empty for root)' } },
     },
   },
   {
@@ -321,7 +437,7 @@ const TOOLS = [
   // ========== Contact — Official API ==========
   {
     name: 'find_user',
-    description: '[Official API] Find a Feishu user by email or mobile number. Returns open_id.',
+    description: '[Official API] Find a Feishu user by email or mobile number.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -335,7 +451,7 @@ const TOOLS = [
 // --- Server ---
 
 const server = new Server(
-  { name: 'feishu-user-mcp', version: '0.3.0' },
+  { name: 'feishu-user-mcp', version: '0.4.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -353,14 +469,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function handleTool(name, args) {
   const text = (s) => ({ content: [{ type: 'text', text: s }] });
   const json = (o) => text(JSON.stringify(o, null, 2));
-
-  // --- User Identity Tools (cookie-based) ---
+  const sendResult = (r, desc) => text(r.success ? desc : `Send failed (status: ${r.status})`);
 
   switch (name) {
+    // --- User Identity: Text Messaging ---
+
     case 'send_as_user': {
       const c = await getUserClient();
-      const r = await c.sendMessage(args.chat_id, args.text);
-      return text(r.success ? `Message sent as user to chat ${args.chat_id}` : `Send failed: ${r.status}`);
+      const r = await c.sendMessage(args.chat_id, args.text, { rootId: args.root_id, parentId: args.parent_id });
+      return sendResult(r, `Text sent as user to ${args.chat_id}`);
     }
     case 'send_to_user': {
       const c = await getUserClient();
@@ -370,7 +487,7 @@ async function handleTool(name, args) {
       const chatId = await c.createChat(user.id);
       if (!chatId) return text(`Failed to create chat with ${user.title}`);
       const r = await c.sendMessage(chatId, args.text);
-      return text(r.success ? `Message sent to ${user.title} (chat: ${chatId})` : `Send failed: ${r.status}`);
+      return sendResult(r, `Text sent to ${user.title} (chat: ${chatId})`);
     }
     case 'send_to_group': {
       const c = await getUserClient();
@@ -378,8 +495,39 @@ async function handleTool(name, args) {
       const group = results.find(r => r.type === 'group');
       if (!group) return text(`Group "${args.group_name}" not found. Results: ${JSON.stringify(results)}`);
       const r = await c.sendMessage(group.id, args.text);
-      return text(r.success ? `Message sent to group "${group.title}" (${group.id})` : `Send failed: ${r.status}`);
+      return sendResult(r, `Text sent to group "${group.title}" (${group.id})`);
     }
+
+    // --- User Identity: Rich Message Types ---
+
+    case 'send_image_as_user': {
+      const c = await getUserClient();
+      const r = await c.sendImage(args.chat_id, args.image_key, { rootId: args.root_id });
+      return sendResult(r, `Image sent to ${args.chat_id}`);
+    }
+    case 'send_file_as_user': {
+      const c = await getUserClient();
+      const r = await c.sendFile(args.chat_id, args.file_key, args.file_name, { rootId: args.root_id });
+      return sendResult(r, `File "${args.file_name}" sent to ${args.chat_id}`);
+    }
+    case 'send_sticker_as_user': {
+      const c = await getUserClient();
+      const r = await c.sendSticker(args.chat_id, args.sticker_id, args.sticker_set_id);
+      return sendResult(r, `Sticker sent to ${args.chat_id}`);
+    }
+    case 'send_post_as_user': {
+      const c = await getUserClient();
+      const r = await c.sendPost(args.chat_id, args.title || '', args.paragraphs, { rootId: args.root_id });
+      return sendResult(r, `Post sent to ${args.chat_id}`);
+    }
+    case 'send_audio_as_user': {
+      const c = await getUserClient();
+      const r = await c.sendAudio(args.chat_id, args.audio_key);
+      return sendResult(r, `Audio sent to ${args.chat_id}`);
+    }
+
+    // --- User Identity: Contacts & Info ---
+
     case 'search_contacts': {
       const c = await getUserClient();
       return json(await c.search(args.query));
@@ -403,37 +551,50 @@ async function handleTool(name, args) {
       const parts = [];
       try {
         const c = await getUserClient();
-        parts.push(`Cookie: Active (${c.userName || c.userId})`);
+        const status = await c.checkSession();
+        parts.push(`Cookie: ${status.valid ? 'Active' : 'Expired'} (${status.userName || status.userId || 'unknown'})`);
+        parts.push(`  ${status.message}`);
       } catch (e) { parts.push(`Cookie: ${e.message}`); }
       const hasApp = !!(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
-      parts.push(`App credentials: ${hasApp ? 'Configured' : 'Not set (docs/tables/wiki unavailable)'}`);
+      parts.push(`App credentials: ${hasApp ? 'Configured' : 'Not set'}`);
       return text(parts.join('\n'));
     }
 
-    // --- Official API Tools ---
+    // --- Official API: IM ---
 
     case 'list_chats':
       return json(await getOfficialClient().listChats({ pageSize: args.page_size, pageToken: args.page_token }));
-    case 'read_messages':
-      return json(await getOfficialClient().readMessages(args.chat_id, {
+    case 'read_messages': {
+      const official = getOfficialClient();
+      let resolvedChatId = args.chat_id;
+      if (!resolvedChatId.startsWith('oc_')) {
+        const byName = await chatIdMapper.resolveToOcId(resolvedChatId, official);
+        if (byName) {
+          resolvedChatId = byName;
+        } else {
+          return text(`Cannot resolve "${args.chat_id}" to oc_ ID. Use list_chats to find the correct ID, or provide chat name.`);
+        }
+      }
+      return json(await official.readMessages(resolvedChatId, {
         pageSize: args.page_size, startTime: args.start_time, endTime: args.end_time,
       }));
-    case 'reply_message': {
-      const r = await getOfficialClient().replyMessage(args.message_id, args.text);
-      return text(`Reply sent: ${r.messageId}`);
     }
-    case 'forward_message': {
-      const r = await getOfficialClient().forwardMessage(args.message_id, args.receive_id);
-      return text(`Message forwarded: ${r.messageId}`);
-    }
+    case 'reply_message':
+      return text(`Reply sent: ${(await getOfficialClient().replyMessage(args.message_id, args.text)).messageId}`);
+    case 'forward_message':
+      return text(`Forwarded: ${(await getOfficialClient().forwardMessage(args.message_id, args.receive_id)).messageId}`);
+
+    // --- Official API: Docs ---
+
     case 'search_docs':
       return json(await getOfficialClient().searchDocs(args.query));
     case 'read_doc':
       return json(await getOfficialClient().readDoc(args.document_id));
-    case 'create_doc': {
-      const r = await getOfficialClient().createDoc(args.title, args.folder_id);
-      return text(`Document created: ${r.documentId}`);
-    }
+    case 'create_doc':
+      return text(`Document created: ${(await getOfficialClient().createDoc(args.title, args.folder_id)).documentId}`);
+
+    // --- Official API: Bitable ---
+
     case 'list_bitable_tables':
       return json(await getOfficialClient().listBitableTables(args.app_token));
     case 'list_bitable_fields':
@@ -442,28 +603,32 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().searchBitableRecords(args.app_token, args.table_id, {
         filter: args.filter, sort: args.sort, pageSize: args.page_size,
       }));
-    case 'create_bitable_record': {
-      const r = await getOfficialClient().createBitableRecord(args.app_token, args.table_id, args.fields);
-      return text(`Record created: ${r.recordId}`);
-    }
-    case 'update_bitable_record': {
-      const r = await getOfficialClient().updateBitableRecord(args.app_token, args.table_id, args.record_id, args.fields);
-      return text(`Record updated: ${r.recordId}`);
-    }
+    case 'create_bitable_record':
+      return text(`Record created: ${(await getOfficialClient().createBitableRecord(args.app_token, args.table_id, args.fields)).recordId}`);
+    case 'update_bitable_record':
+      return text(`Record updated: ${(await getOfficialClient().updateBitableRecord(args.app_token, args.table_id, args.record_id, args.fields)).recordId}`);
+
+    // --- Official API: Wiki ---
+
     case 'list_wiki_spaces':
       return json(await getOfficialClient().listWikiSpaces());
     case 'search_wiki':
       return json(await getOfficialClient().searchWiki(args.query));
     case 'list_wiki_nodes':
       return json(await getOfficialClient().listWikiNodes(args.space_id, { parentNodeToken: args.parent_node_token }));
+
+    // --- Official API: Drive ---
+
     case 'list_files':
       return json(await getOfficialClient().listFiles(args.folder_token));
-    case 'create_folder': {
-      const r = await getOfficialClient().createFolder(args.name, args.parent_token);
-      return text(`Folder created: ${r.token}`);
-    }
+    case 'create_folder':
+      return text(`Folder created: ${(await getOfficialClient().createFolder(args.name, args.parent_token)).token}`);
+
+    // --- Official API: Contact ---
+
     case 'find_user':
       return json(await getOfficialClient().findUserByIdentity({ emails: args.email, mobiles: args.mobile }));
+
     default:
       return text(`Unknown tool: ${name}`);
   }
@@ -472,7 +637,7 @@ async function handleTool(name, args) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[feishu-user-mcp] MCP Server started — %d tools available', TOOLS.length);
+  console.error('[feishu-user-mcp] MCP Server v0.4.0 — %d tools available', TOOLS.length);
 }
 
 main().catch(console.error);

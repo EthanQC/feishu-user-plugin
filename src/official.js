@@ -192,6 +192,22 @@ class LarkOfficialClient {
     return { userList: res.data.user_list || [] };
   }
 
+  // --- Chat ID Resolution ---
+
+  async listAllChats() {
+    const allChats = [];
+    let pageToken;
+    let hasMore = true;
+    while (hasMore) {
+      const res = await this.client.im.chat.list({ params: { page_size: 100, page_token: pageToken } });
+      if (res.code !== 0) throw new Error(`listAllChats failed: ${res.msg}`);
+      allChats.push(...(res.data.items || []));
+      pageToken = res.data.page_token;
+      hasMore = res.data.has_more && !!pageToken;
+    }
+    return allChats;
+  }
+
   // --- Helpers ---
 
   _formatMessage(m) {

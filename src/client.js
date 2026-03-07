@@ -6,6 +6,9 @@ const GATEWAY_URL = 'https://internal-api-lark-api.feishu.cn/im/gateway/';
 const CSRF_URL = 'https://internal-api-lark-api.feishu.cn/accounts/csrf';
 const USER_INFO_URL = 'https://internal-api-lark-api.feishu.cn/accounts/web/user';
 
+// Message type enum (matches proto)
+const MsgType = { POST: 2, FILE: 3, TEXT: 4, IMAGE: 5, AUDIO: 7, STICKER: 10, MEDIA: 15 };
+
 class LarkUserClient {
   constructor(cookieStr) {
     this.cookieObj = parseCookie(cookieStr);
@@ -14,6 +17,7 @@ class LarkUserClient {
     this.userId = null;
     this.userName = null;
     this.proto = null;
+    this._heartbeatTimer = null;
   }
 
   async init() {
@@ -24,6 +28,7 @@ class LarkUserClient {
       throw new Error('Failed to authenticate. Cookie may be expired — re-login at feishu.cn and update LARK_COOKIE.');
     }
     console.error(`[feishu-user-mcp] Initialized as user: ${this.userName || this.userId}`);
+    this._startHeartbeat();
   }
 
   // --- Auth ---
@@ -42,6 +47,15 @@ class LarkUserClient {
       if (match) {
         this.csrfToken = match[1];
         this.cookieObj['swp_csrf_token'] = match[1];
+        this.cookieStr = formatCookie(this.cookieObj);
+        break;
+      }
+    }
+    // Also capture refreshed sl_session if present
+    for (const c of setCookie) {
+      const match = c.match(/sl_session=([^;]+)/);
+      if (match) {
+        this.cookieObj['sl_session'] = match[1];
         this.cookieStr = formatCookie(this.cookieObj);
         break;
       }
@@ -65,6 +79,48 @@ class LarkUserClient {
       this.userName = body.data.user.name || null;
     }
   }
+
+  // --- Cookie Heartbeat ---
+
+  _startHeartbeat() {
+    // Refresh CSRF token every 4 hours to keep session alive
+    // Feishu sl_session has 12h max-age; CSRF refresh also refreshes sl_session
+    this._heartbeatTimer = setInterval(async () => {
+      try {
+        await this._getCsrfToken();
+        console.error('[feishu-user-mcp] Cookie heartbeat: session refreshed');
+      } catch (e) {
+        console.error('[feishu-user-mcp] Cookie heartbeat failed:', e.message);
+      }
+    }, 4 * 60 * 60 * 1000); // 4 hours
+    // Don't keep the process alive just for heartbeat
+    if (this._heartbeatTimer.unref) this._heartbeatTimer.unref();
+  }
+
+  async checkSession() {
+    try {
+      await this._getCsrfToken();
+      const res = await fetch(`${USER_INFO_URL}?app_id=12&_t=${Date.now()}`, {
+        headers: {
+          ...this._jsonHeaders(),
+          'x-csrf-token': this.csrfToken || '',
+          'x-request-id': generateRequestId(),
+        },
+      });
+      const body = await res.json().catch(() => null);
+      const valid = !!body?.data?.user?.id;
+      return {
+        valid,
+        userId: body?.data?.user?.id,
+        userName: body?.data?.user?.name,
+        message: valid ? 'Session active' : 'Session expired — re-login required',
+      };
+    } catch (e) {
+      return { valid: false, message: `Session check failed: ${e.message}` };
+    }
+  }
+
+  // --- Headers ---
 
   _jsonHeaders() {
     return {
@@ -133,15 +189,15 @@ class LarkUserClient {
     return { packet: this._decode('Packet', resBuf), ok: res.ok };
   }
 
-  // --- Send Message (cmd=5) ---
+  // --- Send Text Message (cmd=5) ---
 
-  async sendMessage(chatId, text) {
+  async sendMessage(chatId, text, { rootId, parentId } = {}) {
     const cid1 = generateCid();
     const cid2 = generateCid();
     const textPropBuf = this._encode('TextProperty', { content: text });
 
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', {
-      type: 4,
+    const req = {
+      type: MsgType.TEXT,
       chatId,
       cid: cid1,
       isNotified: true,
@@ -157,8 +213,154 @@ class LarkUserClient {
           },
         },
       },
-    }, '5.7.0');
+    };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
 
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
+    return {
+      success: ok && (packet.status === 0 || packet.status == null),
+      status: packet.status,
+    };
+  }
+
+  // --- Send Image (cmd=5, type=IMAGE) ---
+
+  async sendImage(chatId, imageKey, { rootId, parentId } = {}) {
+    const cid1 = generateCid();
+    const req = {
+      type: MsgType.IMAGE,
+      chatId,
+      cid: cid1,
+      isNotified: true,
+      version: 1,
+      content: { imageKey },
+    };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
+
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
+    return {
+      success: ok && (packet.status === 0 || packet.status == null),
+      status: packet.status,
+    };
+  }
+
+  // --- Send File (cmd=5, type=FILE) ---
+
+  async sendFile(chatId, fileKey, fileName, { rootId, parentId } = {}) {
+    const cid1 = generateCid();
+    const req = {
+      type: MsgType.FILE,
+      chatId,
+      cid: cid1,
+      isNotified: true,
+      version: 1,
+      content: { fileKey, fileName },
+    };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
+
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
+    return {
+      success: ok && (packet.status === 0 || packet.status == null),
+      status: packet.status,
+    };
+  }
+
+  // --- Send Audio (cmd=5, type=AUDIO) ---
+
+  async sendAudio(chatId, audioKey, { rootId, parentId } = {}) {
+    const cid1 = generateCid();
+    const req = {
+      type: MsgType.AUDIO,
+      chatId,
+      cid: cid1,
+      isNotified: true,
+      version: 1,
+      content: { audioKey },
+    };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
+
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
+    return {
+      success: ok && (packet.status === 0 || packet.status == null),
+      status: packet.status,
+    };
+  }
+
+  // --- Send Sticker (cmd=5, type=STICKER) ---
+
+  async sendSticker(chatId, stickerId, stickerSetId, { rootId, parentId } = {}) {
+    const cid1 = generateCid();
+    const req = {
+      type: MsgType.STICKER,
+      chatId,
+      cid: cid1,
+      isNotified: true,
+      version: 1,
+      content: { stickerId, stickerSetId },
+    };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
+
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
+    return {
+      success: ok && (packet.status === 0 || packet.status == null),
+      status: packet.status,
+    };
+  }
+
+  // --- Send Rich Text / POST (cmd=5, type=POST) ---
+
+  async sendPost(chatId, title, paragraphs, { rootId, parentId } = {}) {
+    // paragraphs: array of arrays of elements
+    // Each element: { tag: 'text', text: '...' } or { tag: 'at', userId: '...' } or { tag: 'a', href: '...', text: '...' }
+    // Builds flat richText structure (one element per text segment)
+    const cid1 = generateCid();
+    const elementIds = [];
+    const dictionary = {};
+
+    for (const para of paragraphs) {
+      for (const elem of para) {
+        const elemId = generateCid();
+        elementIds.push(elemId);
+
+        if (elem.tag === 'text') {
+          const propBuf = this._encode('TextProperty', { content: elem.text });
+          dictionary[elemId] = { tag: 1, property: propBuf };
+        } else if (elem.tag === 'at') {
+          const propBuf = this._encode('TextProperty', { content: elem.userId });
+          dictionary[elemId] = { tag: 5, property: propBuf };
+        } else if (elem.tag === 'a') {
+          const propBuf = this._encode('TextProperty', { content: elem.text || elem.href });
+          dictionary[elemId] = { tag: 6, property: propBuf };
+        }
+      }
+    }
+
+    const innerText = paragraphs.map(p => p.map(e => e.text || '').join('')).join('\n');
+
+    const req = {
+      type: MsgType.POST,
+      chatId,
+      cid: cid1,
+      isNotified: true,
+      version: 1,
+      content: {
+        title: title || '',
+        richText: {
+          elementIds,
+          innerText,
+          elements: { dictionary },
+        },
+      },
+    };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
+
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
     return {
       success: ok && (packet.status === 0 || packet.status == null),
       status: packet.status,
@@ -255,4 +457,4 @@ class LarkUserClient {
   }
 }
 
-module.exports = { LarkUserClient };
+module.exports = { LarkUserClient, MsgType };
