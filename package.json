@@ -1,15 +1,16 @@
 {
   "name": "feishu-user-mcp",
-  "version": "0.5.0",
-  "description": "All-in-one Feishu/Lark MCP Server — user identity messaging + official API + P2P chat reading via OAuth UAT. 33 tools.",
+  "version": "0.5.1",
+  "description": "All-in-one Feishu/Lark MCP Server — 33 tools, 3 auth layers: user identity messaging (Protobuf), official API (REST), P2P chat reading (OAuth UAT).",
   "main": "src/index.js",
   "bin": {
     "feishu-user-mcp": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
-    "oauth": "node src/oauth.js",
-    "test-send": "node src/test-send.js"
+    "test": "node src/test-all.js",
+    "test:quick": "node src/test-send.js",
+    "oauth": "node src/oauth.js"
   },
   "keywords": [
     "feishu",
@@ -29,6 +30,19 @@
     "type": "git",
     "url": "https://github.com/EthanQC/feishu-user-mcp.git"
   },
+  "homepage": "https://github.com/EthanQC/feishu-user-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/EthanQC/feishu-user-mcp/issues"
+  },
+  "files": [
+    "src/",
+    "proto/",
+    ".env.example",
+    "server.json",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },

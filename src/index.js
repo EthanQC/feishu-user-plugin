@@ -479,7 +479,7 @@ const TOOLS = [
 // --- Server ---
 
 const server = new Server(
-  { name: 'feishu-user-mcp', version: '0.5.0' },
+  { name: 'feishu-user-mcp', version: '0.5.1' },
   { capabilities: { tools: {} } }
 );
 
@@ -674,7 +674,7 @@ async function handleTool(name, args) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[feishu-user-mcp] MCP Server v0.5.0 — %d tools available', TOOLS.length);
+  console.error('[feishu-user-mcp] MCP Server v0.5.1 — %d tools available', TOOLS.length);
 }
 
 main().catch(console.error);

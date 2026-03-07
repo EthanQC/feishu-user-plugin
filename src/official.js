@@ -156,8 +156,10 @@ class LarkOfficialClient {
   // --- Docs ---
 
   async searchDocs(query, { pageSize = 10, pageToken } = {}) {
-    const res = await this.client.docx.builtin.search({
-      data: { search_key: query, count: pageSize, offset: pageToken ? parseInt(pageToken) : 0 },
+    const res = await this.client.request({
+      method: 'POST',
+      url: '/open-apis/suite/docs-api/search/object',
+      data: { search_key: query, count: pageSize, offset: pageToken ? parseInt(pageToken) : 0, owner_ids: [], chat_ids: [], docs_types: [] },
     });
     if (res.code !== 0) throw new Error(`searchDocs failed (${res.code}): ${res.msg}`);
     return { items: res.data.docs_entities || [], hasMore: res.data.has_more };
@@ -236,12 +238,13 @@ class LarkOfficialClient {
   }
 
   async searchWiki(query) {
-    const res = await this.client.wiki.node.search({
-      data: { query },
-      params: { page_size: 20 },
+    const res = await this.client.request({
+      method: 'POST',
+      url: '/open-apis/suite/docs-api/search/object',
+      data: { search_key: query, count: 20, offset: 0, owner_ids: [], chat_ids: [], docs_types: ['wiki'] },
     });
     if (res.code !== 0) throw new Error(`searchWiki failed (${res.code}): ${res.msg}`);
-    return { items: res.data.items || [] };
+    return { items: res.data.docs_entities || [] };
   }
 
   async getWikiNode(spaceId, nodeToken) {
@@ -325,9 +328,16 @@ class LarkOfficialClient {
       senderType: m.sender?.sender_type,
       msgType: m.msg_type,
       content: body,
-      createTime: m.create_time,
-      updateTime: m.update_time,
+      createTime: this._normalizeTimestamp(m.create_time),
+      updateTime: this._normalizeTimestamp(m.update_time),
     };
+  }
+
+  _normalizeTimestamp(ts) {
+    if (!ts) return null;
+    const n = parseInt(ts);
+    // Feishu returns millisecond strings; normalize to seconds
+    return String(n > 1e12 ? Math.floor(n / 1000) : n);
   }
 }
 

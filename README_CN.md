@@ -3,36 +3,116 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
+[![Tools](https://img.shields.io/badge/Tools-33-orange.svg)](#工具一览33-个)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [English](README.md) | **中文**
 
-**以你的个人身份发飞书消息 — 不是机器人。**
+**全能飞书 MCP 服务器 — 33 个工具，8 个技能，三层认证，覆盖消息、文档、多维表格、知识库和云盘。**
 
-一个 MCP（Model Context Protocol）服务器，通过逆向飞书 Web 端的 Protobuf 协议，让 Claude Code 和其他 AI 工具能以你的真实身份发消息、搜索联系人、管理会话。
+唯一支持以**你的真实身份**（而非机器人）发送飞书消息的 MCP 服务器，同时集成飞书官方 API 的全部能力。
+
+## 特性
+
+- **以你的身份发消息** — 消息显示你的真实姓名，不是机器人。支持文本、富文本、图片、文件、表情包和语音。
+- **读取所有聊天** — 通过 Bot API 读取群聊，通过 OAuth UAT 读取私聊（单聊）。
+- **全套飞书能力** — 文档、多维表格、知识库、云盘、通讯录 — 一个插件搞定。
+- **自动会话管理** — Cookie 每 4 小时心跳刷新，UAT 过期自动续期。
+- **群名自动解析** — 直接传群名而不用 `oc_xxx` ID，自动查找匹配。
 
 ## 为什么需要这个？
 
 飞书官方 API 有一个硬限制：**没有 `send_as_user` 权限**。即使使用 `user_access_token`（OAuth），消息仍然显示 `sender_type: "app"` — 来自应用而不是你。
 
-本项目完全绕过了这个限制，使用飞书 Web 客户端内部使用的同一协议。
+本项目将三层认证整合进一个插件：
 
 ```
-官方 API:  你 → 机器人应用 → 飞书（显示为机器人发送）
-本项目:    你 → Cookie 认证 → 飞书（显示为你本人发送）
+用户身份 (Cookie):      你 → Protobuf → 飞书（消息显示为你本人发送）
+官方 API (App Token):   你 → REST API → 飞书（文档、表格、知识库、云盘）
+用户 OAuth (UAT):       你 → REST API → 飞书（读取私聊、列出所有会话）
 ```
 
-## 功能
+**一个插件，覆盖飞书全部场景。**
+
+## 工具一览（33 个）
+
+### 用户身份 — 消息发送（逆向协议，Cookie 认证）
 
 | 工具 | 说明 |
 |------|------|
-| `send_to_user` | 搜索用户 + 发消息 — 一步到位 |
-| `send_to_group` | 搜索群组 + 发消息 — 一步到位 |
-| `send_as_user` | 通过 chat ID 发消息到任意会话 |
-| `search_contacts` | 搜索用户、机器人和群组 |
-| `create_p2p_chat` | 创建/获取单聊会话 |
-| `get_chat_info` | 获取群详情（群名、人数、群主等） |
-| `get_user_info` | 查询用户显示名称 |
-| `get_login_status` | 检查会话是否有效 |
+| `send_to_user` | 搜索用户 + 发送文本 — 一步到位 |
+| `send_to_group` | 搜索群组 + 发送文本 — 一步到位 |
+| `send_as_user` | 通过 chat ID 发消息到任意会话，支持回复线程 (`root_id` / `parent_id`) |
+| `send_image_as_user` | 发送图片（需要先上传获取 `image_key`） |
+| `send_file_as_user` | 发送文件（需要先上传获取 `file_key`） |
+| `send_post_as_user` | 发送富文本，支持标题 + 格式化段落（链接、@提及） |
+| `send_sticker_as_user` | 发送表情包 |
+| `send_audio_as_user` | 发送语音消息 |
+
+### 用户身份 — 通讯录与信息
+
+| 工具 | 说明 |
+|------|------|
+| `search_contacts` | 搜索用户、机器人或群聊 |
+| `create_p2p_chat` | 创建/获取单聊会话，返回数字 `chat_id` |
+| `get_chat_info` | 获取群详情：群名、描述、人数、群主 |
+| `get_user_info` | 通过用户 ID 查询显示名称 |
+| `get_login_status` | 检查 Cookie、App 凭据和 UAT 状态 |
+
+### 用户 OAuth UAT — 私聊读取
+
+| 工具 | 说明 |
+|------|------|
+| `read_p2p_messages` | 读取私聊（单聊）消息历史，可访问机器人无法进入的会话 |
+| `list_user_chats` | 列出用户参与的所有会话，包括私聊 |
+
+### 官方 API — 即时消息（Bot 身份）
+
+| 工具 | 说明 |
+|------|------|
+| `list_chats` | 列出机器人加入的所有群 |
+| `read_messages` | 读取消息历史（支持群名或 `oc_xxx` ID） |
+| `reply_message` | 以机器人身份回复指定消息 |
+| `forward_message` | 转发消息到另一个会话 |
+
+### 官方 API — 文档
+
+| 工具 | 说明 |
+|------|------|
+| `search_docs` | 按关键词搜索文档 |
+| `read_doc` | 读取文档原始文本内容 |
+| `create_doc` | 创建新文档 |
+
+### 官方 API — 多维表格
+
+| 工具 | 说明 |
+|------|------|
+| `list_bitable_tables` | 列出多维表格中的所有数据表 |
+| `list_bitable_fields` | 列出数据表的所有字段（列） |
+| `search_bitable_records` | 按条件查询记录 |
+| `create_bitable_record` | 创建新记录（行） |
+| `update_bitable_record` | 更新已有记录 |
+
+### 官方 API — 知识库
+
+| 工具 | 说明 |
+|------|------|
+| `list_wiki_spaces` | 列出所有可访问的知识空间 |
+| `search_wiki` | 按关键词搜索知识库文档 |
+| `list_wiki_nodes` | 浏览知识库节点树 |
+
+### 官方 API — 云盘
+
+| 工具 | 说明 |
+|------|------|
+| `list_files` | 列出文件夹中的文件 |
+| `create_folder` | 创建新文件夹 |
+
+### 官方 API — 通讯录
+
+| 工具 | 说明 |
+|------|------|
+| `find_user` | 通过邮箱或手机号查找用户 |
 
 ## 快速开始
 
@@ -48,7 +128,7 @@ npm install
 
 登录 [feishu.cn/messenger](https://www.feishu.cn/messenger/)，然后提取 Cookie。
 
-> **重要**：需要 HttpOnly 的 Cookie（如 `session`），`document.cookie` 无法获取。请使用以下方法：
+> **重要**：需要 HttpOnly 的 Cookie（如 `session`），`document.cookie` 无法获取。
 
 **方法一：浏览器 DevTools（手动）**
 1. 打开 `F12` → `应用` → `Cookie` → `https://www.feishu.cn`
@@ -57,7 +137,6 @@ npm install
 
 **方法二：Playwright（推荐，可获取 HttpOnly Cookie）**
 ```js
-// 如果你在 Claude Code 中配置了 Playwright MCP：
 const cookies = await context.cookies('https://www.feishu.cn');
 const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
 ```
@@ -66,22 +145,54 @@ const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
 
 ```bash
 cp .env.example .env
-# 编辑 .env，在 LARK_COOKIE= 后面粘贴你的 Cookie 字符串
 ```
 
-### 4. 验证
+编辑 `.env`：
+
+```env
+# 必需 — 用户身份消息发送（逆向协议）
+LARK_COOKIE=粘贴你的Cookie
+
+# 必需 — 官方 API（文档、表格、知识库、云盘、Bot IM）
+LARK_APP_ID=cli_xxxxx
+LARK_APP_SECRET=xxxxx
+
+# 可选 — 私聊读取（运行: node src/oauth.js）
+LARK_USER_ACCESS_TOKEN=
+LARK_USER_REFRESH_TOKEN=
+```
+
+> Cookie 用于用户身份消息发送。App 凭据用于官方 API。UAT 为可选，仅私聊读取需要。
+
+### 4. （可选）启用私聊读取
+
+如需使用 `read_p2p_messages` 读取私聊历史：
+
+1. 飞书应用必须是**自建应用**（非商店应用）
+2. 添加权限：`im:message`、`im:message:readonly`、`im:chat:readonly`
+3. OAuth 重定向 URI 设为 `http://127.0.0.1:9997/callback`
+4. 运行授权：
+
+```bash
+node src/oauth.js
+```
+
+会打开浏览器进行 OAuth 授权，UAT 自动保存到 `.env`。过期后自动续期。
+
+### 5. 验证
 
 ```bash
 node src/test-send.js              # 检查登录状态
 node src/test-send.js search 张三   # 搜索联系人
+node src/test-all.js               # 运行完整测试
 ```
 
-### 5. 接入 AI 客户端
+## 接入 AI 客户端
 
 <details>
 <summary><strong>Claude Code</strong></summary>
 
-在你的项目 `.mcp.json` 中添加：
+在项目 `.mcp.json` 中添加：
 
 ```json
 {
@@ -89,28 +200,31 @@ node src/test-send.js search 张三   # 搜索联系人
     "feishu-user-mcp": {
       "type": "stdio",
       "command": "node",
-      "args": ["/你的绝对路径/feishu-user-mcp/src/index.js"],
+      "args": ["/绝对路径/feishu-user-mcp/src/index.js"],
       "env": {}
     }
   }
 }
 ```
 
-然后直接说："给张三发消息说明天下午开会"
+然后直接说：
+- "给张三发消息说明天下午开会"
+- "帮我看一下技术群最近聊了什么"
+- "搜索飞书文档里关于 MCP 的内容"
 
 </details>
 
 <details>
 <summary><strong>Claude Desktop</strong></summary>
 
-添加到 `~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）：
+添加到 `~/Library/Application Support/Claude/claude_desktop_config.json`（macOS）或 `%APPDATA%\Claude\claude_desktop_config.json`（Windows）：
 
 ```json
 {
   "mcpServers": {
     "feishu-user-mcp": {
       "command": "node",
-      "args": ["/你的绝对路径/feishu-user-mcp/src/index.js"]
+      "args": ["/绝对路径/feishu-user-mcp/src/index.js"]
     }
   }
 }
@@ -127,55 +241,104 @@ node src/test-send.js search 张三   # 搜索联系人
 
 ## Claude Code 技能
 
-仓库包含即用的 Claude Code 技能（`.claude/commands/`）：
+仓库包含 8 个即用的 [slash commands](https://docs.anthropic.com/en/docs/claude-code/tutorials#create-custom-slash-commands)（`.claude/commands/`）：
 
 | 技能 | 用法 | 说明 |
 |------|------|------|
-| `/send` | `/send 张三: 明天下午3点开会` | 给用户发消息 |
+| `/send` | `/send 张三: 明天下午3点开会` | 以你的身份发消息 |
+| `/reply` | `/reply 工坊群` | 读取最近消息并回复 |
+| `/digest` | `/digest 工坊群 7` | 整理最近群聊消息 |
 | `/search` | `/search 技术` | 搜索联系人和群组 |
-| `/status` | `/status` | 检查登录状态 |
+| `/doc` | `/doc search MCP` | 搜索、读取或创建文档 |
+| `/table` | `/table query appXxx` | 查询或创建多维表格记录 |
+| `/wiki` | `/wiki search 协议` | 搜索和浏览知识库 |
+| `/status` | `/status` | 检查登录和认证状态 |
 
-## 工作原理
+使用方法：将 `.claude/commands/` 复制到你的项目中。
+
+## 架构
 
 ```
-┌──────────────┐     Cookie 认证     ┌──────────────────────────────────────┐
-│  Claude Code │ ───────────────────→ │  internal-api-lark-api.feishu.cn     │
-│  (MCP 客户端) │ ←───────────────── │  /im/gateway/ (Protobuf over HTTP)   │
-└──────────────┘     Protobuf        └──────────────────────────────────────┘
+┌──────────────┐                    ┌──────────────────────────────────────┐
+│              │   Cookie + Proto   │  internal-api-lark-api.feishu.cn     │
+│  MCP 客户端   │ ──────────────────→│  /im/gateway/ (Protobuf over HTTP)   │
+│  (Claude,    │                    └──────────────────────────────────────┘
+│   Cursor,    │   App Token (REST) ┌──────────────────────────────────────┐
+│   VS Code)   │ ──────────────────→│  open.feishu.cn/open-apis/           │
+│              │                    │  (官方 REST API)                     │
+│              │   User OAuth (REST)┌──────────────────────────────────────┐
+│              │ ──────────────────→│  open.feishu.cn/open-apis/           │
+└──────────────┘                    │  (UAT — 私聊读取)                    │
+                                    └──────────────────────────────────────┘
 ```
 
-**协议命令**（Protobuf `cmd` 字段）：
+### Protobuf 命令（用户身份层）
+
 | cmd | 操作 | Proto 消息 |
 |-----|------|-----------|
-| 5 | 发送消息 | `PutMessageRequest` |
-| 13 | 创建会话 | `PutChatRequest` |
+| 5 | 发送消息（文本、图片、文件、富文本、表情、语音） | `PutMessageRequest` |
+| 13 | 创建单聊 | `PutChatRequest` |
 | 64 | 获取群信息 | `GetGroupInfoRequest` |
 | 5023 | 获取用户信息 | `GetUserInfoRequest` |
-| 11021 | 搜索 | `UniversalSearchRequest` |
+| 11021 | 全局搜索 | `UniversalSearchRequest` |
 
-基于 [cv-cat/LarkAgentX](https://github.com/cv-cat/LarkAgentX)（Python）的协议研究，用 Node.js 完全重写并集成 MCP。
+## 会话与令牌生命周期
 
-## Cookie 生命周期
+| 认证层 | 令牌 | 有效期 | 刷新方式 |
+|--------|------|--------|---------|
+| Cookie | `sl_session` | 12h | 每 4h 心跳自动刷新 |
+| App Token | `tenant_access_token` | 2h | SDK 自动管理 |
+| User OAuth | `user_access_token` | ~2h | 通过 `refresh_token` 自动续期，保存到 `.env` |
 
-- 飞书 Web 会话通常持续 **12-24 小时**
-- 会话过期后，MCP 服务器会抛出认证错误
-- 需要重新登录 feishu.cn 并更新 `.env` 中的 `LARK_COOKIE`
-- 使用 `get_login_status` 工具检查会话状态
+Cookie 过期后（无心跳约 12-24h），需重新登录 feishu.cn 更新 `LARK_COOKIE`。使用 `get_login_status` 主动检查状态。
+
+## 项目结构
+
+```
+feishu-user-mcp/
+├── src/
+│   ├── index.js          # MCP 服务器入口（33 个工具）
+│   ├── client.js         # 用户身份客户端（Protobuf 网关）
+│   ├── official.js       # 官方 API 客户端（REST、UAT）
+│   ├── utils.js          # ID 生成器、Cookie 解析
+│   ├── oauth.js          # OAuth 授权流程
+│   ├── oauth-auto.js     # Playwright 自动化 OAuth
+│   ├── test-send.js      # 快速 CLI 测试
+│   └── test-all.js       # 完整测试套件
+├── proto/
+│   └── lark.proto        # Protobuf 消息定义
+├── .claude/
+│   └── commands/         # 8 个 Claude Code 技能
+├── .github/              # Issue 和 PR 模板
+├── CLAUDE.md             # AI 项目指令
+├── CHANGELOG.md          # 版本历史
+├── CONTRIBUTING.md       # 贡献指南
+├── server.json           # MCP Registry 清单
+├── .env.example          # 配置模板
+└── package.json
+```
 
 ## 局限性
 
-- Cookie 认证需要定期手动刷新
-- 依赖飞书内部协议 — 飞书更新 Web 客户端可能导致失效
-- 仅支持文本消息（暂不支持富文本、图片、卡片）
-- 暂无实时消息接收（WebSocket 监听尚未实现）
+- Cookie 认证需要定期刷新（心跳自动延长至 ~12h，之后需手动重新登录）
+- 依赖飞书内部 Protobuf 协议 — 飞书更新 Web 客户端可能导致失效
+- 图片/文件/语音发送需要预上传获取 key（通过官方 API 或外部桥接）
+- 暂无实时消息接收（WebSocket 推送尚未实现）
+- `get_user_info` 部分用户可能返回 null（proto 定义限制）
 - 可能违反飞书服务条款 — 使用风险自负
+
+## 贡献
+
+欢迎提 Issue 和 PR！开发设置、代码规范和提交指南请参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+如果飞书更新协议导致功能异常，请[提交 Issue](https://github.com/EthanQC/feishu-user-mcp/issues/new?template=bug_report.md) 并附上错误详情，我们会尽快修复。
+
+## 许可证
+
+[MIT](LICENSE)
 
 ## 致谢
 
 - [cv-cat/LarkAgentX](https://github.com/cv-cat/LarkAgentX) — 飞书协议逆向工程（Python）
 - [cv-cat/OpenFeiShuApis](https://github.com/cv-cat/OpenFeiShuApis) — 底层 API 研究
 - [Model Context Protocol](https://modelcontextprotocol.io) — MCP 标准
-
-## 许可证
-
-[MIT](LICENSE)

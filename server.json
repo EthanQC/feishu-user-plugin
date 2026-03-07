@@ -1,30 +1,51 @@
 {
   "name": "feishu-user-mcp",
-  "display_name": "Feishu User MCP",
-  "description": "Send Feishu/Lark messages as your personal identity (not a bot) using reverse-engineered Protobuf protocol",
+  "display_name": "Feishu/Lark All-in-One MCP Server",
+  "description": "All-in-one Feishu/Lark MCP Server — 33 tools, 3 auth layers: personal identity messaging (Protobuf), official API (REST), P2P chat reading (OAuth UAT)",
+  "version": "0.5.1",
   "icon": "https://www.feishu.cn/favicon.ico",
   "repository": {
     "type": "git",
     "url": "https://github.com/EthanQC/feishu-user-mcp"
   },
   "license": "MIT",
-  "categories": ["communication", "messaging"],
-  "tags": ["feishu", "lark", "im", "messaging", "protobuf"],
+  "categories": ["communication", "messaging", "productivity"],
+  "tags": ["feishu", "lark", "im", "messaging", "docs", "bitable", "wiki", "protobuf", "mcp"],
   "tools": [
-    { "name": "send_to_user", "description": "Search user by name and send message in one step" },
-    { "name": "send_to_group", "description": "Search group by name and send message in one step" },
-    { "name": "send_as_user", "description": "Send message to any chat by chat ID" },
-    { "name": "search_contacts", "description": "Search users, bots, and groups by keyword" },
-    { "name": "create_p2p_chat", "description": "Create or get a direct message chat" },
-    { "name": "get_chat_info", "description": "Get group chat details" },
-    { "name": "get_user_info", "description": "Look up user display name" },
-    { "name": "get_login_status", "description": "Check session validity" }
+    { "name": "send_to_user", "description": "Search user + send text message as yourself — one step" },
+    { "name": "send_to_group", "description": "Search group + send text message as yourself — one step" },
+    { "name": "send_as_user", "description": "Send text to any chat by ID, supports reply threading" },
+    { "name": "send_image_as_user", "description": "Send image message (requires image_key)" },
+    { "name": "send_file_as_user", "description": "Send file message (requires file_key)" },
+    { "name": "send_post_as_user", "description": "Send rich text with title, paragraphs, links, @mentions" },
+    { "name": "send_sticker_as_user", "description": "Send sticker/emoji" },
+    { "name": "send_audio_as_user", "description": "Send audio message" },
+    { "name": "search_contacts", "description": "Search users, bots, or groups by name" },
+    { "name": "create_p2p_chat", "description": "Create/get a P2P (direct message) chat" },
+    { "name": "get_chat_info", "description": "Get group details: name, members, owner" },
+    { "name": "get_user_info", "description": "Look up user display name by ID" },
+    { "name": "get_login_status", "description": "Check cookie, app credentials, and UAT status" },
+    { "name": "read_p2p_messages", "description": "Read P2P chat history via OAuth UAT" },
+    { "name": "list_user_chats", "description": "List all chats the user is in (including P2P)" },
+    { "name": "list_chats", "description": "List all chats the bot has joined" },
+    { "name": "read_messages", "description": "Read message history (accepts chat name or oc_ ID)" },
+    { "name": "reply_message", "description": "Reply to a specific message (as bot)" },
+    { "name": "forward_message", "description": "Forward a message to another chat" },
+    { "name": "search_docs", "description": "Search documents by keyword" },
+    { "name": "read_doc", "description": "Read raw text content of a document" },
+    { "name": "create_doc", "description": "Create a new document" },
+    { "name": "list_bitable_tables", "description": "List tables in a Bitable app" },
+    { "name": "list_bitable_fields", "description": "List fields (columns) in a table" },
+    { "name": "search_bitable_records", "description": "Query records with filter/sort" },
+    { "name": "create_bitable_record", "description": "Create a new record (row)" },
+    { "name": "update_bitable_record", "description": "Update an existing record" },
+    { "name": "list_wiki_spaces", "description": "List all accessible wiki spaces" },
+    { "name": "search_wiki", "description": "Search wiki/docs by keyword" },
+    { "name": "list_wiki_nodes", "description": "Browse wiki node tree" },
+    { "name": "list_files", "description": "List files in a Drive folder" },
+    { "name": "create_folder", "description": "Create a new folder in Drive" },
+    { "name": "find_user", "description": "Find user by email or mobile number" }
   ],
-  "packages": {
-    "npm": {
-      "name": "feishu-user-mcp"
-    }
-  },
   "installations": {
     "claude-code": {
       "type": "stdio",
@@ -35,8 +56,23 @@
   "environment_variables": [
     {
       "name": "LARK_COOKIE",
-      "description": "Feishu web login cookie string",
+      "description": "Feishu web login cookie string (required for user identity messaging)",
       "required": true
+    },
+    {
+      "name": "LARK_APP_ID",
+      "description": "Feishu Open Platform App ID (required for official API)",
+      "required": true
+    },
+    {
+      "name": "LARK_APP_SECRET",
+      "description": "Feishu Open Platform App Secret (required for official API)",
+      "required": true
+    },
+    {
+      "name": "LARK_USER_ACCESS_TOKEN",
+      "description": "OAuth user_access_token for P2P chat reading (optional, run: node src/oauth.js)",
+      "required": false
     }
   ]
 }
