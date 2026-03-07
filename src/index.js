@@ -74,6 +74,7 @@ function getOfficialClient() {
   const appSecret = process.env.LARK_APP_SECRET;
   if (!appId || !appSecret) throw new Error('LARK_APP_ID and LARK_APP_SECRET not set.');
   officialClient = new LarkOfficialClient(appId, appSecret);
+  officialClient.loadUAT();
   return officialClient;
 }
 
@@ -236,7 +237,34 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
 
-  // ========== IM — Official API ==========
+  // ========== IM — Official API (User Identity via UAT) ==========
+  {
+    name: 'read_p2p_messages',
+    description: '[User UAT] Read P2P (direct message) chat history using user_access_token. Works for chats the bot cannot access. Requires OAuth setup: run "node src/oauth.js" first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Chat ID (oc_xxx). Use list_user_chats to find P2P chat IDs.' },
+        page_size: { type: 'number', description: 'Messages to fetch (default 20, max 50)' },
+        start_time: { type: 'string', description: 'Start timestamp in seconds (optional)' },
+        end_time: { type: 'string', description: 'End timestamp in seconds (optional)' },
+      },
+      required: ['chat_id'],
+    },
+  },
+  {
+    name: 'list_user_chats',
+    description: '[User UAT] List all chats the user is in (including P2P). Requires OAuth setup.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_size: { type: 'number', description: 'Items per page (default 20)' },
+        page_token: { type: 'string', description: 'Pagination token' },
+      },
+    },
+  },
+
+  // ========== IM — Official API (Bot Identity) ==========
   {
     name: 'list_chats',
     description: '[Official API] List all chats the bot has joined. Returns chat_id, name, type.',
@@ -451,7 +479,7 @@ const TOOLS = [
 // --- Server ---
 
 const server = new Server(
-  { name: 'feishu-user-mcp', version: '0.4.0' },
+  { name: 'feishu-user-mcp', version: '0.5.0' },
   { capabilities: { tools: {} } }
 );
 
@@ -558,8 +586,21 @@ async function handleTool(name, args) {
       } catch (e) { parts.push(`Cookie: ${e.message}`); }
       const hasApp = !!(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
       parts.push(`App credentials: ${hasApp ? 'Configured' : 'Not set'}`);
+      const official = hasApp ? getOfficialClient() : null;
+      parts.push(`User access token: ${official?.hasUAT ? 'Configured (P2P reading enabled)' : 'Not set (run: node src/oauth.js)'}`);
       return text(parts.join('\n'));
     }
+
+    // --- User UAT: IM ---
+
+    case 'read_p2p_messages': {
+      const official = getOfficialClient();
+      return json(await official.readMessagesAsUser(args.chat_id, {
+        pageSize: args.page_size, startTime: args.start_time, endTime: args.end_time,
+      }));
+    }
+    case 'list_user_chats':
+      return json(await getOfficialClient().listChatsAsUser({ pageSize: args.page_size, pageToken: args.page_token }));
 
     // --- Official API: IM ---
 
@@ -633,7 +674,7 @@ async function handleTool(name, args) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[feishu-user-mcp] MCP Server v0.4.0 — %d tools available', TOOLS.length);
+  console.error('[feishu-user-mcp] MCP Server v0.5.0 — %d tools available', TOOLS.length);
 }
 
 main().catch(console.error);

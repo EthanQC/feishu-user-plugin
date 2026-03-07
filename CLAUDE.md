@@ -1,9 +1,10 @@
 # feishu-user-mcp — Claude Code Instructions
 
 ## What This Is
-All-in-one Feishu MCP Server with two backends:
+All-in-one Feishu MCP Server with three auth layers:
 - **User Identity** (cookie auth): Send messages (text, image, file, post, sticker, audio) as yourself
-- **Official API** (app credentials): Read messages, docs, tables, wiki, drive, contacts
+- **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts
+- **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
 ## Tool Categories
 
@@ -22,7 +23,11 @@ All-in-one Feishu MCP Server with two backends:
 - `create_p2p_chat` — Create/get P2P chat
 - `get_chat_info` — Group details (name, members, owner)
 - `get_user_info` — User display name lookup
-- `get_login_status` — Check both cookie and app status, refreshes session
+- `get_login_status` — Check cookie, app, and UAT status
+
+### User OAuth UAT Tools (P2P chat reading)
+- `read_p2p_messages` — Read P2P (direct message) chat history. Requires OAuth setup.
+- `list_user_chats` — List all chats the user is in (including P2P). Requires OAuth setup.
 
 ### Official API Tools (app credentials)
 - `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, auto-resolves to oc_ ID)
@@ -37,7 +42,8 @@ All-in-one Feishu MCP Server with two backends:
 ## Usage Patterns
 - Send text as yourself → `send_to_user` or `send_to_group`
 - Send rich content → `send_post_as_user` (formatted text), `send_image_as_user` (images)
-- Read chat history → `read_messages` with chat name or oc_ ID
+- Read group chat history → `read_messages` with chat name or oc_ ID
+- Read P2P chat history → `read_p2p_messages` (requires OAuth UAT)
 - Reply as user in thread → `send_as_user` with root_id
 - Reply as bot → `reply_message` (official API)
 - Diagnose issues → `get_login_status` first
@@ -45,9 +51,16 @@ All-in-one Feishu MCP Server with two backends:
 ## Auth & Session
 - **LARK_COOKIE**: Required for user identity tools. Session auto-refreshed every 4h via heartbeat.
 - **LARK_APP_ID + LARK_APP_SECRET**: Required for official API tools.
-- Cookie expiry: sl_session has 12h max-age, auto-refreshed by heartbeat. Full re-login needed if cookie becomes invalid.
+- **LARK_USER_ACCESS_TOKEN**: Required for P2P reading. Obtained via `node src/oauth.js`. Auto-refreshed.
+- Cookie expiry: sl_session has 12h max-age, auto-refreshed by heartbeat.
+
+## P2P Chat Reading Setup
+To enable `read_p2p_messages` and `list_user_chats`, the Feishu app needs:
+1. App type: 自建应用 (custom app), NOT marketplace/b2c/b2b
+2. Scopes: `im:message`, `im:message:readonly`, `im:chat:readonly`
+3. OAuth redirect URI: `http://127.0.0.1:9997/callback`
+4. Run `node src/oauth.js` to authorize and save the UAT
 
 ## Known Limitations
-- P2P chat history reading not yet supported (requires WebSocket protocol reverse engineering)
 - Image/file upload must go through Official API or feishu-file-bridge first to obtain keys
 - CARD message type (type=14) not yet implemented — complex JSON schema

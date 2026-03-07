@@ -1,13 +1,14 @@
 {
   "name": "feishu-user-mcp",
-  "version": "0.4.0",
-  "description": "All-in-one Feishu/Lark MCP Server — user identity messaging (text, image, file, post, sticker, audio) + official API (docs, tables, wiki, drive). 31 tools.",
+  "version": "0.5.0",
+  "description": "All-in-one Feishu/Lark MCP Server — user identity messaging + official API + P2P chat reading via OAuth UAT. 33 tools.",
   "main": "src/index.js",
   "bin": {
     "feishu-user-mcp": "src/index.js"
   },
   "scripts": {
     "start": "node src/index.js",
+    "oauth": "node src/oauth.js",
     "test-send": "node src/test-send.js"
   },
   "keywords": [

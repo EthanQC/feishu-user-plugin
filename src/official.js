@@ -2,7 +2,111 @@ const lark = require('@larksuiteoapi/node-sdk');
 
 class LarkOfficialClient {
   constructor(appId, appSecret) {
+    this.appId = appId;
+    this.appSecret = appSecret;
     this.client = new lark.Client({ appId, appSecret, disableTokenCache: false });
+    this._uat = null;
+    this._uatRefresh = null;
+    this._uatExpires = 0;
+  }
+
+  // --- UAT (User Access Token) Management ---
+
+  loadUAT() {
+    const token = process.env.LARK_USER_ACCESS_TOKEN;
+    const refresh = process.env.LARK_USER_REFRESH_TOKEN;
+    const expires = parseInt(process.env.LARK_UAT_EXPIRES || '0');
+    if (token) {
+      this._uat = token;
+      this._uatRefresh = refresh || null;
+      this._uatExpires = expires;
+    }
+  }
+
+  get hasUAT() {
+    return !!this._uat;
+  }
+
+  async _getValidUAT() {
+    if (!this._uat) throw new Error('No user_access_token. Run: node src/oauth.js');
+
+    const now = Math.floor(Date.now() / 1000);
+    if (this._uatExpires > now + 300) return this._uat;
+
+    if (!this._uatRefresh) throw new Error('UAT expired and no refresh token. Run: node src/oauth.js');
+
+    const res = await fetch('https://open.feishu.cn/open-apis/authen/v2/oauth/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        client_id: this.appId,
+        client_secret: this.appSecret,
+        refresh_token: this._uatRefresh,
+      }),
+    });
+    const data = await res.json();
+    // v2 response: access_token at top level or under data
+    const tokenData = data.access_token ? data : data.data;
+    if (!tokenData?.access_token) throw new Error(`UAT refresh failed: ${JSON.stringify(data)}. Run: node src/oauth.js`);
+
+    this._uat = tokenData.access_token;
+    this._uatRefresh = tokenData.refresh_token;
+    this._uatExpires = now + tokenData.expires_in;
+
+    const fs = require('fs');
+    const path = require('path');
+    const envPath = path.join(__dirname, '..', '.env');
+    try {
+      let env = fs.readFileSync(envPath, 'utf8');
+      for (const [key, val] of Object.entries({
+        LARK_USER_ACCESS_TOKEN: this._uat,
+        LARK_USER_REFRESH_TOKEN: this._uatRefresh,
+        LARK_UAT_EXPIRES: String(this._uatExpires),
+      })) {
+        const regex = new RegExp(`^${key}=.*$`, 'm');
+        if (regex.test(env)) env = env.replace(regex, `${key}=${val}`);
+        else env += `\n${key}=${val}`;
+      }
+      fs.writeFileSync(envPath, env.trim() + '\n');
+    } catch {}
+
+    console.error('[feishu-user-mcp] UAT refreshed successfully');
+    return this._uat;
+  }
+
+  // --- UAT-based IM operations (for P2P chats) ---
+
+  async listChatsAsUser({ pageSize = 20, pageToken } = {}) {
+    const uat = await this._getValidUAT();
+    const params = new URLSearchParams({ page_size: String(pageSize) });
+    if (pageToken) params.set('page_token', pageToken);
+    const res = await fetch(`https://open.feishu.cn/open-apis/im/v1/chats?${params}`, {
+      headers: { 'Authorization': `Bearer ${uat}` },
+    });
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(`listChatsAsUser failed (${data.code}): ${data.msg}`);
+    return { items: data.data.items || [], pageToken: data.data.page_token, hasMore: data.data.has_more };
+  }
+
+  async readMessagesAsUser(chatId, { pageSize = 20, startTime, endTime, pageToken } = {}) {
+    const uat = await this._getValidUAT();
+    const params = new URLSearchParams({
+      container_id_type: 'chat', container_id: chatId, page_size: String(pageSize),
+    });
+    if (startTime) params.set('start_time', startTime);
+    if (endTime) params.set('end_time', endTime);
+    if (pageToken) params.set('page_token', pageToken);
+    const res = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?${params}`, {
+      headers: { 'Authorization': `Bearer ${uat}` },
+    });
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(`readMessagesAsUser failed (${data.code}): ${data.msg}`);
+    return {
+      items: (data.data.items || []).map(m => this._formatMessage(m)),
+      hasMore: data.data.has_more,
+      pageToken: data.data.page_token,
+    };
   }
 
   // --- IM ---
