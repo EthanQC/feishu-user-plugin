@@ -1,0 +1,272 @@
+syntax = "proto3";
+
+// Outer WebSocket frame
+message Frame {
+  optional uint64 seqid = 1;
+  optional uint64 logid = 2;
+  optional int32 service = 3;
+  optional int32 method = 4;
+  repeated ExtendedEntry headers = 5;
+  optional string payloadEncoding = 6;
+  optional string payloadType = 7;
+  optional bytes payload = 8;
+}
+
+// Inner packet (inside Frame.payload or HTTP response)
+message Packet {
+  optional string sid = 1;
+  optional PayloadType payloadType = 2;
+  optional int32 cmd = 3;
+  optional uint32 status = 4;
+  optional bytes payload = 5;
+  optional string cid = 6;
+}
+
+enum PayloadType {
+  TYPE_UNKNOWN = 0;
+  PB2 = 1;
+  JSON = 2;
+}
+
+message ExtendedEntry {
+  optional string key = 1;
+  optional string value = 2;
+}
+
+// === IM Messages ===
+
+message PutMessageRequest {
+  optional Type type = 1;
+  optional Content content = 2;
+  optional string chatId = 3;
+  optional string rootId = 4;
+  optional string parentId = 5;
+  optional string cid = 6;
+  optional bool isNotified = 7;
+  optional bool sendToChat = 8;
+  optional int32 version = 9;
+}
+
+message PushMessagesRequest {
+  map<string, MessageEntity> messages = 1;
+  map<string, bool> participatedMessageIds = 3;
+  map<string, bool> forcePush = 8;
+  map<string, bool> messagesAtMe = 9;
+}
+
+message MessageEntity {
+  optional string id = 1;
+  optional Type type = 2;
+  optional string fromId = 3;
+  optional int64 createTime = 4;
+  optional bytes content = 5;
+  optional MessageStatus status = 6;
+  optional FromType fromType = 7;
+  optional string rootId = 8;
+  optional string parentId = 9;
+  optional string chatId = 10;
+  optional int64 lastModifyTime = 11;
+  optional string cid = 12;
+  optional int32 position = 13;
+  optional int64 updateTime = 14;
+  optional ChatType chatType = 46;
+
+  enum MessageStatus {
+    UNKNOWN_STATUS = 0;
+    NORMAL = 1;
+    DELETED = 2;
+    MODIFIED = 3;
+  }
+}
+
+enum Type {
+  UNKNOWN = 0;
+  POST = 2;
+  FILE = 3;
+  TEXT = 4;
+  IMAGE = 5;
+  SYSTEM = 6;
+  AUDIO = 7;
+  STICKER = 10;
+  CARD = 14;
+  MEDIA = 15;
+}
+
+enum FromType {
+  UNKNOWN_FROMTYPE = 0;
+  USER = 1;
+  BOT = 2;
+}
+
+enum ChatType {
+  UNKNOWN_CHAT_TYPE = 0;
+  P2P = 1;
+  GROUP = 2;
+  TOPIC_GROUP = 3;
+}
+
+// === Content ===
+
+message Content {
+  optional string text = 1;
+  optional string imageKey = 2;
+  optional string title = 3;
+  optional RichText richText = 14;
+}
+
+message TextContent {
+  optional string text = 1;
+  optional RichText richText = 3;
+}
+
+message RichText {
+  repeated string elementIds = 1;
+  optional string innerText = 2;
+  optional RichTextElements elements = 3;
+}
+
+message RichTextElements {
+  map<string, RichTextElement> dictionary = 1;
+}
+
+message RichTextElement {
+  optional Tag tag = 1;
+  map<string, string> style = 2;
+  optional bytes property = 3;
+  repeated string childIds = 4;
+
+  enum Tag {
+    UNKNOWN_TAG = 0;
+    TEXT = 1;
+    IMG = 2;
+    P = 3;
+    FIGURE = 4;
+    AT = 5;
+    A = 6;
+  }
+}
+
+message TextProperty {
+  optional string content = 1;
+}
+
+// === Chat ===
+
+message PutChatRequest {
+  optional Type type = 1;
+  repeated string userIds = 2;
+  repeated string chatterIds = 6;
+}
+
+message PutChatResponse {
+  optional Chat chat = 1;
+}
+
+message Chat {
+  optional string id = 1;
+  optional ChatTypeEnum type = 2;
+  optional string name = 4;
+
+  enum ChatTypeEnum {
+    UNKNOWN_CHAT = 0;
+    P2P_CHAT = 1;
+    GROUP_CHAT = 2;
+  }
+}
+
+// === Search ===
+
+message UniversalSearchRequest {
+  optional SearchCommonRequestHeader header = 1;
+}
+
+message SearchCommonRequestHeader {
+  optional string searchSession = 1;
+  optional int32 sessionSeqId = 2;
+  optional string query = 3;
+  optional string paginationToken = 4;
+  optional SearchContext searchContext = 5;
+  optional string locale = 6;
+  optional int32 pageSize = 11;
+
+  message SearchContext {
+    optional string tagName = 1;
+    repeated EntityItem entityItems = 2;
+    optional CommonFilter commonFilter = 3;
+    optional string sourceKey = 5;
+  }
+}
+
+message EntityItem {
+  optional SearchEntityType type = 1;
+  optional EntityFilter filter = 2;
+
+  message EntityFilter {
+    oneof filter {
+      GroupChatFilter groupChatFilter = 2;
+    }
+  }
+}
+
+message GroupChatFilter {}
+
+message CommonFilter {
+  optional bool includeOuterTenant = 1;
+}
+
+enum SearchEntityType {
+  SEARCH_UNKNOWN = 0;
+  SEARCH_USER = 1;
+  SEARCH_BOT = 2;
+  SEARCH_GROUP_CHAT = 3;
+}
+
+message UniversalSearchResponse {
+  optional SearchResponseHeader header = 1;
+  repeated SearchResult results = 2;
+}
+
+message SearchResponseHeader {
+  optional int32 total = 3;
+  optional bool hasMore = 4;
+}
+
+message SearchResult {
+  optional string id = 1;
+  optional SearchEntityType type = 2;
+  optional string titleHighlighted = 3;
+  optional string summaryHighlighted = 4;
+  optional string avatarKey = 6;
+}
+
+// === User Info ===
+
+message GetUserInfoRequest {
+  optional int64 chatId = 1;
+  optional int64 userId = 3;
+  optional int32 userType = 4;
+}
+
+message GetGroupInfoRequest {
+  optional string chatId = 1;
+}
+
+message UserInfo {
+  optional UserInfoDetail userInfoDetail = 1;
+}
+
+message UserInfoDetail {
+  optional Detail detail = 2;
+}
+
+message Detail {
+  optional bytes nickname = 2;
+  optional bytes nickname1 = 4;
+  optional bytes nickname4 = 17;
+  repeated LocaleEntry locales = 18;
+}
+
+message LocaleEntry {
+  optional string key_string = 1;
+  optional string translation = 2;
+}
