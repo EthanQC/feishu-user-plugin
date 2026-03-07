@@ -43,23 +43,12 @@ class LarkUserClient {
     });
     const setCookie = res.headers.getSetCookie?.() || [];
     for (const c of setCookie) {
-      const match = c.match(/swp_csrf_token=([^;]+)/);
-      if (match) {
-        this.csrfToken = match[1];
-        this.cookieObj['swp_csrf_token'] = match[1];
-        this.cookieStr = formatCookie(this.cookieObj);
-        break;
-      }
+      const csrf = c.match(/swp_csrf_token=([^;]+)/);
+      if (csrf) { this.csrfToken = csrf[1]; this.cookieObj['swp_csrf_token'] = csrf[1]; }
+      const sl = c.match(/sl_session=([^;]+)/);
+      if (sl) { this.cookieObj['sl_session'] = sl[1]; }
     }
-    // Also capture refreshed sl_session if present
-    for (const c of setCookie) {
-      const match = c.match(/sl_session=([^;]+)/);
-      if (match) {
-        this.cookieObj['sl_session'] = match[1];
-        this.cookieStr = formatCookie(this.cookieObj);
-        break;
-      }
-    }
+    this.cookieStr = formatCookie(this.cookieObj);
     if (!this.csrfToken) {
       console.error('[feishu-user-mcp] Warning: Could not obtain CSRF token');
     }
@@ -100,20 +89,12 @@ class LarkUserClient {
   async checkSession() {
     try {
       await this._getCsrfToken();
-      const res = await fetch(`${USER_INFO_URL}?app_id=12&_t=${Date.now()}`, {
-        headers: {
-          ...this._jsonHeaders(),
-          'x-csrf-token': this.csrfToken || '',
-          'x-request-id': generateRequestId(),
-        },
-      });
-      const body = await res.json().catch(() => null);
-      const valid = !!body?.data?.user?.id;
+      await this._getUserInfo();
       return {
-        valid,
-        userId: body?.data?.user?.id,
-        userName: body?.data?.user?.name,
-        message: valid ? 'Session active' : 'Session expired — re-login required',
+        valid: !!this.userId,
+        userId: this.userId,
+        userName: this.userName,
+        message: this.userId ? 'Session active' : 'Session expired — re-login required',
       };
     } catch (e) {
       return { valid: false, message: `Session check failed: ${e.message}` };
@@ -122,14 +103,20 @@ class LarkUserClient {
 
   // --- Headers ---
 
-  _jsonHeaders() {
+  _baseHeaders() {
     return {
-      'accept': 'application/json, text/plain, */*',
       'accept-language': 'zh-CN,zh;q=0.9',
       'cookie': this.cookieStr,
       'origin': 'https://www.feishu.cn',
       'referer': 'https://www.feishu.cn/',
       'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    };
+  }
+
+  _jsonHeaders() {
+    return {
+      ...this._baseHeaders(),
+      'accept': 'application/json, text/plain, */*',
       'x-app-id': '12',
       'x-api-version': '2',
       'x-device-info': 'platform=websdk',
@@ -141,14 +128,10 @@ class LarkUserClient {
 
   _protoHeaders(cmd, cmdVersion = '2.7.0') {
     return {
+      ...this._baseHeaders(),
       'accept': '*/*',
-      'accept-language': 'zh-CN,zh;q=0.9',
       'content-type': 'application/x-protobuf',
       'locale': 'zh_CN',
-      'cookie': this.cookieStr,
-      'origin': 'https://www.feishu.cn',
-      'referer': 'https://www.feishu.cn/',
-      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       'x-appid': '161471',
       'x-command': String(cmd),
       'x-command-version': cmdVersion,
@@ -189,136 +172,57 @@ class LarkUserClient {
     return { packet: this._decode('Packet', resBuf), ok: res.ok };
   }
 
-  // --- Send Text Message (cmd=5) ---
+  // --- Generic Send (cmd=5) ---
 
-  async sendMessage(chatId, text, { rootId, parentId } = {}) {
-    const cid1 = generateCid();
-    const cid2 = generateCid();
+  async _sendMsg(type, chatId, content, { rootId, parentId } = {}) {
+    const req = { type, chatId, cid: generateCid(), isNotified: true, version: 1, content };
+    if (rootId) req.rootId = rootId;
+    if (parentId) req.parentId = parentId;
+    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
+    return { success: ok && (packet.status === 0 || packet.status == null), status: packet.status };
+  }
+
+  // --- Send Text Message ---
+
+  async sendMessage(chatId, text, opts = {}) {
+    const elemId = generateCid();
     const textPropBuf = this._encode('TextProperty', { content: text });
-
-    const req = {
-      type: MsgType.TEXT,
-      chatId,
-      cid: cid1,
-      isNotified: true,
-      version: 1,
-      content: {
-        richText: {
-          elementIds: [cid2],
-          innerText: text,
-          elements: {
-            dictionary: {
-              [cid2]: { tag: 1, property: textPropBuf },
-            },
-          },
-        },
+    return this._sendMsg(MsgType.TEXT, chatId, {
+      richText: {
+        elementIds: [elemId],
+        innerText: text,
+        elements: { dictionary: { [elemId]: { tag: 1, property: textPropBuf } } },
       },
-    };
-    if (rootId) req.rootId = rootId;
-    if (parentId) req.parentId = parentId;
-
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
-    return {
-      success: ok && (packet.status === 0 || packet.status == null),
-      status: packet.status,
-    };
+    }, opts);
   }
 
-  // --- Send Image (cmd=5, type=IMAGE) ---
+  // --- Send Image ---
 
-  async sendImage(chatId, imageKey, { rootId, parentId } = {}) {
-    const cid1 = generateCid();
-    const req = {
-      type: MsgType.IMAGE,
-      chatId,
-      cid: cid1,
-      isNotified: true,
-      version: 1,
-      content: { imageKey },
-    };
-    if (rootId) req.rootId = rootId;
-    if (parentId) req.parentId = parentId;
-
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
-    return {
-      success: ok && (packet.status === 0 || packet.status == null),
-      status: packet.status,
-    };
+  async sendImage(chatId, imageKey, opts = {}) {
+    return this._sendMsg(MsgType.IMAGE, chatId, { imageKey }, opts);
   }
 
-  // --- Send File (cmd=5, type=FILE) ---
+  // --- Send File ---
 
-  async sendFile(chatId, fileKey, fileName, { rootId, parentId } = {}) {
-    const cid1 = generateCid();
-    const req = {
-      type: MsgType.FILE,
-      chatId,
-      cid: cid1,
-      isNotified: true,
-      version: 1,
-      content: { fileKey, fileName },
-    };
-    if (rootId) req.rootId = rootId;
-    if (parentId) req.parentId = parentId;
-
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
-    return {
-      success: ok && (packet.status === 0 || packet.status == null),
-      status: packet.status,
-    };
+  async sendFile(chatId, fileKey, fileName, opts = {}) {
+    return this._sendMsg(MsgType.FILE, chatId, { fileKey, fileName }, opts);
   }
 
-  // --- Send Audio (cmd=5, type=AUDIO) ---
+  // --- Send Audio ---
 
-  async sendAudio(chatId, audioKey, { rootId, parentId } = {}) {
-    const cid1 = generateCid();
-    const req = {
-      type: MsgType.AUDIO,
-      chatId,
-      cid: cid1,
-      isNotified: true,
-      version: 1,
-      content: { audioKey },
-    };
-    if (rootId) req.rootId = rootId;
-    if (parentId) req.parentId = parentId;
-
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
-    return {
-      success: ok && (packet.status === 0 || packet.status == null),
-      status: packet.status,
-    };
+  async sendAudio(chatId, audioKey, opts = {}) {
+    return this._sendMsg(MsgType.AUDIO, chatId, { audioKey }, opts);
   }
 
-  // --- Send Sticker (cmd=5, type=STICKER) ---
+  // --- Send Sticker ---
 
-  async sendSticker(chatId, stickerId, stickerSetId, { rootId, parentId } = {}) {
-    const cid1 = generateCid();
-    const req = {
-      type: MsgType.STICKER,
-      chatId,
-      cid: cid1,
-      isNotified: true,
-      version: 1,
-      content: { stickerId, stickerSetId },
-    };
-    if (rootId) req.rootId = rootId;
-    if (parentId) req.parentId = parentId;
-
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
-    return {
-      success: ok && (packet.status === 0 || packet.status == null),
-      status: packet.status,
-    };
+  async sendSticker(chatId, stickerId, stickerSetId, opts = {}) {
+    return this._sendMsg(MsgType.STICKER, chatId, { stickerId, stickerSetId }, opts);
   }
 
-  // --- Send Rich Text / POST (cmd=5, type=POST) ---
+  // --- Send Rich Text / POST ---
 
-  async sendPost(chatId, title, paragraphs, { rootId, parentId } = {}) {
-    // paragraphs: array of arrays of elements
-    // Each element: { tag: 'text', text: '...' } or { tag: 'at', userId: '...' } or { tag: 'a', href: '...', text: '...' }
-    // Builds flat richText structure (one element per text segment)
-    const cid1 = generateCid();
+  async sendPost(chatId, title, paragraphs, opts = {}) {
     const elementIds = [];
     const dictionary = {};
 
@@ -341,30 +245,10 @@ class LarkUserClient {
     }
 
     const innerText = paragraphs.map(p => p.map(e => e.text || '').join('')).join('\n');
-
-    const req = {
-      type: MsgType.POST,
-      chatId,
-      cid: cid1,
-      isNotified: true,
-      version: 1,
-      content: {
-        title: title || '',
-        richText: {
-          elementIds,
-          innerText,
-          elements: { dictionary },
-        },
-      },
-    };
-    if (rootId) req.rootId = rootId;
-    if (parentId) req.parentId = parentId;
-
-    const { packet, ok } = await this._gateway(5, 'PutMessageRequest', req, '5.7.0');
-    return {
-      success: ok && (packet.status === 0 || packet.status == null),
-      status: packet.status,
-    };
+    return this._sendMsg(MsgType.POST, chatId, {
+      title: title || '',
+      richText: { elementIds, innerText, elements: { dictionary } },
+    }, opts);
   }
 
   // --- Search (cmd=11021) ---

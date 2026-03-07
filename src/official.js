@@ -9,7 +9,7 @@ class LarkOfficialClient {
 
   async listChats({ pageSize = 20, pageToken } = {}) {
     const res = await this.client.im.chat.list({ params: { page_size: pageSize, page_token: pageToken } });
-    if (res.code !== 0) throw new Error(`listChats failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`listChats failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [], pageToken: res.data.page_token, hasMore: res.data.has_more };
   }
 
@@ -19,13 +19,13 @@ class LarkOfficialClient {
     if (endTime) params.end_time = endTime;
     if (pageToken) params.page_token = pageToken;
     const res = await this.client.im.message.list({ params });
-    if (res.code !== 0) throw new Error(`readMessages failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`readMessages failed (${res.code}): ${res.msg}`);
     return { items: (res.data.items || []).map(m => this._formatMessage(m)), hasMore: res.data.has_more, pageToken: res.data.page_token };
   }
 
   async getMessage(messageId) {
     const res = await this.client.im.message.get({ path: { message_id: messageId } });
-    if (res.code !== 0) throw new Error(`getMessage failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`getMessage failed (${res.code}): ${res.msg}`);
     return this._formatMessage(res.data);
   }
 
@@ -35,7 +35,7 @@ class LarkOfficialClient {
       path: { message_id: messageId },
       data: { content, msg_type: msgType },
     });
-    if (res.code !== 0) throw new Error(`replyMessage failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`replyMessage failed (${res.code}): ${res.msg}`);
     return { messageId: res.data.message_id };
   }
 
@@ -45,7 +45,7 @@ class LarkOfficialClient {
       data: { receive_id: receiverId },
       params: { receive_id_type: receiveIdType },
     });
-    if (res.code !== 0) throw new Error(`forwardMessage failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`forwardMessage failed (${res.code}): ${res.msg}`);
     return { messageId: res.data.message_id };
   }
 
@@ -55,25 +55,25 @@ class LarkOfficialClient {
     const res = await this.client.docx.builtin.search({
       data: { search_key: query, count: pageSize, offset: pageToken ? parseInt(pageToken) : 0 },
     });
-    if (res.code !== 0) throw new Error(`searchDocs failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`searchDocs failed (${res.code}): ${res.msg}`);
     return { items: res.data.docs_entities || [], hasMore: res.data.has_more };
   }
 
   async readDoc(documentId) {
     const res = await this.client.docx.document.rawContent({ path: { document_id: documentId }, params: { lang: 0 } });
-    if (res.code !== 0) throw new Error(`readDoc failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`readDoc failed (${res.code}): ${res.msg}`);
     return { content: res.data.content };
   }
 
   async createDoc(title, folderId) {
     const res = await this.client.docx.document.create({ data: { title, folder_token: folderId || '' } });
-    if (res.code !== 0) throw new Error(`createDoc failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`createDoc failed (${res.code}): ${res.msg}`);
     return { documentId: res.data.document?.document_id };
   }
 
   async getDocBlocks(documentId) {
     const res = await this.client.docx.documentBlock.list({ path: { document_id: documentId }, params: { page_size: 500 } });
-    if (res.code !== 0) throw new Error(`getDocBlocks failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`getDocBlocks failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [] };
   }
 
@@ -81,13 +81,13 @@ class LarkOfficialClient {
 
   async listBitableTables(appToken) {
     const res = await this.client.bitable.appTable.list({ path: { app_token: appToken } });
-    if (res.code !== 0) throw new Error(`listTables failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`listTables failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [] };
   }
 
   async listBitableFields(appToken, tableId) {
     const res = await this.client.bitable.appTableField.list({ path: { app_token: appToken, table_id: tableId } });
-    if (res.code !== 0) throw new Error(`listFields failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`listFields failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [] };
   }
 
@@ -101,7 +101,7 @@ class LarkOfficialClient {
       path: { app_token: appToken, table_id: tableId },
       data,
     });
-    if (res.code !== 0) throw new Error(`searchRecords failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`searchRecords failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [], total: res.data.total, hasMore: res.data.has_more };
   }
 
@@ -110,7 +110,7 @@ class LarkOfficialClient {
       path: { app_token: appToken, table_id: tableId },
       data: { fields },
     });
-    if (res.code !== 0) throw new Error(`createRecord failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`createRecord failed (${res.code}): ${res.msg}`);
     return { recordId: res.data.record?.record_id };
   }
 
@@ -119,7 +119,7 @@ class LarkOfficialClient {
       path: { app_token: appToken, table_id: tableId, record_id: recordId },
       data: { fields },
     });
-    if (res.code !== 0) throw new Error(`updateRecord failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`updateRecord failed (${res.code}): ${res.msg}`);
     return { recordId: res.data.record?.record_id };
   }
 
@@ -127,7 +127,7 @@ class LarkOfficialClient {
 
   async listWikiSpaces() {
     const res = await this.client.wiki.space.list({ params: { page_size: 50 } });
-    if (res.code !== 0) throw new Error(`listSpaces failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`listSpaces failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [] };
   }
 
@@ -136,7 +136,7 @@ class LarkOfficialClient {
       data: { query },
       params: { page_size: 20 },
     });
-    if (res.code !== 0) throw new Error(`searchWiki failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`searchWiki failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [] };
   }
 
@@ -144,7 +144,7 @@ class LarkOfficialClient {
     const res = await this.client.wiki.space.getNode({
       params: { token: nodeToken },
     });
-    if (res.code !== 0) throw new Error(`getNode failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`getNode failed (${res.code}): ${res.msg}`);
     return res.data.node;
   }
 
@@ -156,7 +156,7 @@ class LarkOfficialClient {
       path: { space_id: spaceId },
       params,
     });
-    if (res.code !== 0) throw new Error(`listNodes failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`listNodes failed (${res.code}): ${res.msg}`);
     return { items: res.data.items || [], hasMore: res.data.has_more };
   }
 
@@ -166,7 +166,7 @@ class LarkOfficialClient {
     const params = { page_size: pageSize, folder_token: folderToken || '' };
     if (pageToken) params.page_token = pageToken;
     const res = await this.client.drive.file.list({ params });
-    if (res.code !== 0) throw new Error(`listFiles failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`listFiles failed (${res.code}): ${res.msg}`);
     return { items: res.data.files || [], hasMore: res.data.has_more };
   }
 
@@ -174,7 +174,7 @@ class LarkOfficialClient {
     const res = await this.client.drive.file.createFolder({
       data: { name, folder_token: parentToken || '' },
     });
-    if (res.code !== 0) throw new Error(`createFolder failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`createFolder failed (${res.code}): ${res.msg}`);
     return { token: res.data.token };
   }
 
@@ -188,7 +188,7 @@ class LarkOfficialClient {
       data,
       params: { user_id_type: 'open_id' },
     });
-    if (res.code !== 0) throw new Error(`findUser failed: ${res.msg}`);
+    if (res.code !== 0) throw new Error(`findUser failed (${res.code}): ${res.msg}`);
     return { userList: res.data.user_list || [] };
   }
 
@@ -200,7 +200,7 @@ class LarkOfficialClient {
     let hasMore = true;
     while (hasMore) {
       const res = await this.client.im.chat.list({ params: { page_size: 100, page_token: pageToken } });
-      if (res.code !== 0) throw new Error(`listAllChats failed: ${res.msg}`);
+      if (res.code !== 0) throw new Error(`listAllChats failed (${res.code}): ${res.msg}`);
       allChats.push(...(res.data.items || []));
       pageToken = res.data.page_token;
       hasMore = res.data.has_more && !!pageToken;

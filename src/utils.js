@@ -1,26 +1,6 @@
-const crypto = require('crypto');
-
-// MD5 hash — replaces the obfuscated lark_decrypt.js
-function md5(str) {
-  return crypto.createHash('md5').update(str).digest('hex');
-}
-
-// Generate access_key for WebSocket connection
-function generateAccessKey(input) {
-  return md5(input);
-}
-
 // Random 10-char alphanumeric string
 function generateRequestId() {
   return (Math.random().toString(36) + '0000000000').substring(2, 12);
-}
-
-// UUID v4 format
-function generateLongRequestId() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
 }
 
 // Random 10-char CID from alphanumeric set
@@ -52,10 +32,7 @@ function formatCookie(cookieObj) {
 }
 
 module.exports = {
-  md5,
-  generateAccessKey,
   generateRequestId,
-  generateLongRequestId,
   generateCid,
   parseCookie,
   formatCookie,

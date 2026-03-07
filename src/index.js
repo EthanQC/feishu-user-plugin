@@ -466,10 +466,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+const text = (s) => ({ content: [{ type: 'text', text: s }] });
+const json = (o) => text(JSON.stringify(o, null, 2));
+const sendResult = (r, desc) => text(r.success ? desc : `Send failed (status: ${r.status})`);
+
 async function handleTool(name, args) {
-  const text = (s) => ({ content: [{ type: 'text', text: s }] });
-  const json = (o) => text(JSON.stringify(o, null, 2));
-  const sendResult = (r, desc) => text(r.success ? desc : `Send failed (status: ${r.status})`);
 
   switch (name) {
     // --- User Identity: Text Messaging ---
@@ -566,14 +567,9 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().listChats({ pageSize: args.page_size, pageToken: args.page_token }));
     case 'read_messages': {
       const official = getOfficialClient();
-      let resolvedChatId = args.chat_id;
-      if (!resolvedChatId.startsWith('oc_')) {
-        const byName = await chatIdMapper.resolveToOcId(resolvedChatId, official);
-        if (byName) {
-          resolvedChatId = byName;
-        } else {
-          return text(`Cannot resolve "${args.chat_id}" to oc_ ID. Use list_chats to find the correct ID, or provide chat name.`);
-        }
+      const resolvedChatId = await chatIdMapper.resolveToOcId(args.chat_id, official);
+      if (!resolvedChatId) {
+        return text(`Cannot resolve "${args.chat_id}" to oc_ ID. Use list_chats to find the correct ID, or provide chat name.`);
       }
       return json(await official.readMessages(resolvedChatId, {
         pageSize: args.page_size, startTime: args.start_time, endTime: args.end_time,
