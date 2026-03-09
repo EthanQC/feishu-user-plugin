@@ -1,6 +1,6 @@
 {
   "name": "feishu-user-mcp",
-  "version": "0.5.1",
+  "version": "0.5.4",
   "description": "All-in-one Feishu/Lark MCP Server — 33 tools, 3 auth layers: user identity messaging (Protobuf), official API (REST), P2P chat reading (OAuth UAT).",
   "main": "src/index.js",
   "bin": {

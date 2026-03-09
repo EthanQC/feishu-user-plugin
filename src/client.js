@@ -226,7 +226,8 @@ class LarkUserClient {
     const elementIds = [];
     const dictionary = {};
 
-    for (const para of paragraphs) {
+    for (let i = 0; i < paragraphs.length; i++) {
+      const para = paragraphs[i];
       for (const elem of para) {
         const elemId = generateCid();
         elementIds.push(elemId);
@@ -241,6 +242,13 @@ class LarkUserClient {
           const propBuf = this._encode('TextProperty', { content: elem.text || elem.href });
           dictionary[elemId] = { tag: 6, property: propBuf };
         }
+      }
+      // Insert newline element between paragraphs
+      if (i < paragraphs.length - 1) {
+        const nlId = generateCid();
+        elementIds.push(nlId);
+        const propBuf = this._encode('TextProperty', { content: '\n' });
+        dictionary[nlId] = { tag: 1, property: propBuf };
       }
     }
 

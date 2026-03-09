@@ -62,7 +62,14 @@ const chatIdMapper = new ChatIdMapper();
 async function getUserClient() {
   if (userClient) return userClient;
   const cookie = process.env.LARK_COOKIE;
-  if (!cookie) throw new Error('LARK_COOKIE not set. See README for setup instructions.');
+  if (!cookie) throw new Error(
+    'LARK_COOKIE not set. To fix:\n' +
+    '1. Open https://www.feishu.cn/messenger/ and log in\n' +
+    '2. DevTools → Network tab → Disable cache → Reload → Click first request → Request Headers → Cookie → Copy value\n' +
+    '   (Do NOT use document.cookie or Application→Cookies — they miss HttpOnly cookies like session/sl_session)\n' +
+    '3. Paste the cookie string into your .mcp.json env LARK_COOKIE field, then restart Claude Code\n' +
+    'If Playwright MCP is available: navigate to feishu.cn/messenger/, let user log in, then use context.cookies() to get the full cookie string including HttpOnly cookies.'
+  );
   userClient = new LarkUserClient(cookie);
   await userClient.init();
   return userClient;
@@ -72,7 +79,11 @@ function getOfficialClient() {
   if (officialClient) return officialClient;
   const appId = process.env.LARK_APP_ID;
   const appSecret = process.env.LARK_APP_SECRET;
-  if (!appId || !appSecret) throw new Error('LARK_APP_ID and LARK_APP_SECRET not set.');
+  if (!appId || !appSecret) throw new Error(
+    'LARK_APP_ID and LARK_APP_SECRET not set.\n' +
+    'For team members: these should be pre-filled in your .mcp.json. Check that the config was copied correctly from the team-skills README.\n' +
+    'For external users: create a Custom App at https://open.feishu.cn/app, get the App ID and App Secret, add them to your .mcp.json env.'
+  );
   officialClient = new LarkOfficialClient(appId, appSecret);
   officialClient.loadUAT();
   return officialClient;
@@ -587,7 +598,7 @@ async function handleTool(name, args) {
       const hasApp = !!(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
       parts.push(`App credentials: ${hasApp ? 'Configured' : 'Not set'}`);
       const official = hasApp ? getOfficialClient() : null;
-      parts.push(`User access token: ${official?.hasUAT ? 'Configured (P2P reading enabled)' : 'Not set (run: node src/oauth.js)'}`);
+      parts.push(`User access token: ${official?.hasUAT ? 'Configured (P2P reading enabled)' : 'Not set (optional — needed for P2P chat reading. Run OAuth flow to obtain, see README for details)'}`);
       return text(parts.join('\n'));
     }
 
@@ -674,7 +685,7 @@ async function handleTool(name, args) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[feishu-user-mcp] MCP Server v0.5.1 — %d tools available', TOOLS.length);
+  console.error('[feishu-user-mcp] MCP Server v0.5.4 — %d tools available', TOOLS.length);
 }
 
 main().catch(console.error);

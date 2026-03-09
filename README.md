@@ -118,18 +118,26 @@ Each auth layer is independent. You can configure:
 
 ## How to Get Your Cookie
 
+**Option A: With Playwright MCP (recommended)**
+
+If you have [Playwright MCP](https://github.com/anthropics/mcp-playwright) configured, let Claude Code handle it automatically — you just scan the QR code to log in:
+
+```js
+// Playwright can access HttpOnly cookies that document.cookie cannot
+const cookies = await context.cookies('https://www.feishu.cn');
+const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
+```
+
+**Option B: Manual (via Network tab)**
+
 1. Open [feishu.cn/messenger](https://www.feishu.cn/messenger/) in your browser and log in
 2. Open DevTools (`F12` or `Cmd+Option+I`)
-3. Go to **Application** (or **Storage**) > **Cookies** > `https://www.feishu.cn`
-4. You need all cookies, including HttpOnly ones like `session`. Select all, right-click, copy.
-5. Format as a single string: `name1=value1; name2=value2; ...`
+3. Go to the **Network** tab → check **Disable cache** → press `Cmd+R` to reload
+4. Click the first request in the list (usually the page itself)
+5. In the right panel, find **Request Headers** → **Cookie:** → right-click → **Copy value**
 6. Set it as `LARK_COOKIE` in your environment
 
-> **Tip**: If you have [Playwright MCP](https://github.com/anthropics/mcp-playwright) configured, you can extract HttpOnly cookies automatically:
-> ```js
-> const cookies = await context.cookies('https://www.feishu.cn');
-> const cookieStr = cookies.map(c => c.name + '=' + c.value).join('; ');
-> ```
+> ⚠️ **Do NOT** use `document.cookie` in the Console or copy from Application → Cookies tab individually — neither method captures HttpOnly cookies (`session`, `sl_session`), which are required for authentication.
 
 > The server automatically refreshes the session via heartbeat every 4 hours. The `sl_session` cookie has a 12-hour max-age.
 
@@ -137,16 +145,22 @@ Each auth layer is independent. You can configure:
 
 To read direct message history with `read_p2p_messages` and `list_user_chats`:
 
-1. Your Feishu app must be a **Custom App** (自建应用)
+1. Your Feishu app must be a **Custom App** (自建应用), NOT marketplace/third-party
 2. Add scopes: `im:message`, `im:message:readonly`, `im:chat:readonly`
-3. In your app settings, add the OAuth redirect URI: `http://127.0.0.1:9997/callback`
-4. Run the authorization flow:
+3. In your app's **Security Settings** (安全设置), add the OAuth redirect URI: `http://127.0.0.1:9997/callback`
+4. **Important**: Make sure "对外共享" (external sharing) is **disabled** in your app version settings — enabling it marks the app as b2c/b2b type, which blocks P2P chat access
+5. Run the authorization flow:
 
 ```bash
+# If you cloned the repo:
 node src/oauth.js
+
+# If you installed via npx:
+cd $(npm root -g)/feishu-user-mcp && node src/oauth.js
+# Or clone the repo just for the OAuth step, then use npx for daily use
 ```
 
-A browser window will open for OAuth consent. The token is saved to `.env` automatically and auto-refreshes at runtime.
+A browser window will open for OAuth consent. The token is saved to `.env` automatically and auto-refreshes at runtime. Add the resulting `LARK_USER_ACCESS_TOKEN` to your `.mcp.json` env.
 
 ## MCP Client Configuration
 
@@ -178,7 +192,6 @@ Add to your project's `.mcp.json` (or `~/.claude/.mcp.json` for global):
 {
   "mcpServers": {
     "feishu": {
-      "type": "stdio",
       "command": "node",
       "args": ["/absolute/path/to/feishu-user-mcp/src/index.js"],
       "env": {

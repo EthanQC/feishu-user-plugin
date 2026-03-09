@@ -51,7 +51,7 @@ All-in-one Feishu MCP Server with three auth layers:
 ## Auth & Session
 - **LARK_COOKIE**: Required for user identity tools. Session auto-refreshed every 4h via heartbeat.
 - **LARK_APP_ID + LARK_APP_SECRET**: Required for official API tools.
-- **LARK_USER_ACCESS_TOKEN**: Required for P2P reading. Obtained via `node src/oauth.js`. Auto-refreshed.
+- **LARK_USER_ACCESS_TOKEN**: Required for P2P reading. Obtained via OAuth flow. Auto-refreshed.
 - Cookie expiry: sl_session has 12h max-age, auto-refreshed by heartbeat.
 
 ## P2P Chat Reading Setup
@@ -59,7 +59,53 @@ To enable `read_p2p_messages` and `list_user_chats`, the Feishu app needs:
 1. App type: 自建应用 (custom app), NOT marketplace/b2c/b2b
 2. Scopes: `im:message`, `im:message:readonly`, `im:chat:readonly`
 3. OAuth redirect URI: `http://127.0.0.1:9997/callback`
-4. Run `node src/oauth.js` to authorize and save the UAT
+4. The app must NOT have "对外共享" (external sharing) enabled — this marks it as b2c/b2b and blocks P2P access
+5. Run `node src/oauth.js` to authorize and save the UAT
+
+## Troubleshooting Guide (IMPORTANT — read this when things go wrong)
+
+### If feishu MCP tools are not available
+The most likely cause is a `.mcp.json` configuration error. Check:
+1. **The config must NOT have `"type": "stdio"`** — Claude Code's `.mcp.json` does not use a `type` field for stdio servers. If present, the server is silently ignored. Only VS Code's `.vscode/mcp.json` needs `type`.
+2. The correct Claude Code config format:
+```json
+{
+  "feishu-user-mcp": {
+    "command": "npx",
+    "args": ["-y", "feishu-user-mcp"],
+    "env": {
+      "LARK_COOKIE": "...",
+      "LARK_APP_ID": "cli_xxxx",
+      "LARK_APP_SECRET": "xxxx"
+    }
+  }
+}
+```
+3. After fixing, the user must restart the Claude Code session.
+
+### If cookie authentication fails
+- `document.cookie` in browser console **CANNOT** access HttpOnly cookies (`session`, `sl_session`), which are essential.
+- The Application → Cookies tab shows individual entries but has no "copy all as string" feature.
+- **Correct method**: Network tab → Disable cache → reload → click first request → Request Headers → Cookie → right-click → Copy value.
+- **Best method**: If Playwright MCP is available, use `context.cookies('https://www.feishu.cn')` to get all cookies including HttpOnly, then format as `name=value; name=value; ...` string.
+
+### If OAuth fails with error 20029 (redirect_uri invalid)
+- The Feishu app must have `http://127.0.0.1:9997/callback` registered as a redirect URI in Security Settings.
+- Go to Feishu Open Platform → the app → Security Settings → Redirect URLs → add the URI.
+
+### If list_user_chats doesn't return P2P chats
+- The Feishu app must NOT have "对外共享" (external sharing) enabled. This marks the app as b2c/b2b type, which blocks P2P message access.
+- Fix: App Versions → latest version → uncheck the "对外共享" checkbox at bottom → publish new version.
+
+## Helping Users Set Up Cookie via Playwright
+
+If the user asks for help getting their cookie and Playwright MCP is available:
+1. Navigate to `https://www.feishu.cn/messenger/`
+2. Wait for the user to scan QR code and log in
+3. Run: `const cookies = await context.cookies('https://www.feishu.cn')`
+4. Format: `cookies.map(c => c.name + '=' + c.value).join('; ')`
+5. Write the result to the user's `.mcp.json` env `LARK_COOKIE` field
+6. Tell the user to restart Claude Code session
 
 ## Known Limitations
 - Image/file upload must go through Official API or feishu-file-bridge first to obtain keys
