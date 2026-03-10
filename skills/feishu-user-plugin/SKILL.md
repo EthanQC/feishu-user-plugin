@@ -61,7 +61,8 @@ Check cookie / app credentials / UAT — all three auth layers at once.
 | LARK_COOKIE | **You** | Send messages as yourself | Yes (for messaging) |
 | LARK_APP_ID | **You** (create a Feishu app) | Official API access | Yes |
 | LARK_APP_SECRET | **You** (from your Feishu app) | Official API access | Yes |
-| LARK_USER_ACCESS_TOKEN | **You** (OAuth flow, optional) | Read P2P chat history | Optional |
+| LARK_USER_ACCESS_TOKEN | **You** (OAuth flow) | Read P2P chat history | Yes (for P2P reading) |
+| LARK_USER_REFRESH_TOKEN | **You** (OAuth flow) | UAT auto-refresh | Yes (for P2P reading) |
 
 ### Getting Your Cookie (Automated via Playwright)
 

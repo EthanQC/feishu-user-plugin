@@ -160,21 +160,15 @@ LARK_COOKIE=粘贴你的Cookie
 # 必需 — 官方 API（文档、表格、知识库、云盘、Bot IM）
 LARK_APP_ID=cli_xxxxx
 LARK_APP_SECRET=xxxxx
-
-# 可选 — 私聊读取（运行: node src/oauth.js）
-LARK_USER_ACCESS_TOKEN=
-LARK_USER_REFRESH_TOKEN=
 ```
 
-> Cookie 用于用户身份消息发送。App 凭据用于官方 API。UAT 为可选，仅私聊读取需要。
+### 4. 启用私聊读取（OAuth）
 
-### 4. （可选）启用私聊读取
+`read_p2p_messages` 和 `list_user_chats` 需要 OAuth 授权：
 
-如需使用 `read_p2p_messages` 读取私聊历史：
-
-1. 飞书应用必须是**自建应用**（非商店应用）
+1. 飞书应用必须是**自建应用**（非商店应用），且未启用"对外共享"
 2. 添加权限：`im:message`、`im:message:readonly`、`im:chat:readonly`
-3. OAuth 重定向 URI 设为 `http://127.0.0.1:9997/callback`
+3. 安全设置中添加 OAuth 重定向 URI：`http://127.0.0.1:9997/callback`
 4. 运行授权：
 
 ```bash
@@ -182,6 +176,8 @@ node src/oauth.js
 ```
 
 会打开浏览器进行 OAuth 授权，UAT 自动保存到 `.env`。过期后自动续期。
+
+将生成的 `LARK_USER_ACCESS_TOKEN` 和 `LARK_USER_REFRESH_TOKEN` 也添加到 `.mcp.json` 的 env 中。
 
 ### 5. 验证
 
@@ -196,7 +192,7 @@ node src/test-all.js               # 运行完整测试
 <details>
 <summary><strong>Claude Code</strong></summary>
 
-在项目 `.mcp.json` 中添加：
+在项目 `.mcp.json` 或 `~/.claude.json` 的 `mcpServers` 中添加：
 
 ```json
 {
@@ -207,7 +203,9 @@ node src/test-all.js               # 运行完整测试
       "env": {
         "LARK_COOKIE": "你的飞书Cookie",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "你的应用密钥"
+        "LARK_APP_SECRET": "你的应用密钥",
+        "LARK_USER_ACCESS_TOKEN": "你的UAT",
+        "LARK_USER_REFRESH_TOKEN": "你的RefreshToken"
       }
     }
   }

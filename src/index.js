@@ -255,7 +255,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        chat_id: { type: 'string', description: 'Chat ID (oc_xxx). Use list_user_chats to find P2P chat IDs.' },
+        chat_id: { type: 'string', description: 'Chat ID (numeric from create_p2p_chat, or oc_xxx from list_user_chats). Both formats work.' },
         page_size: { type: 'number', description: 'Messages to fetch (default 20, max 50)' },
         start_time: { type: 'string', description: 'Start timestamp in seconds (optional)' },
         end_time: { type: 'string', description: 'End timestamp in seconds (optional)' },
@@ -691,7 +691,16 @@ async function handleTool(name, args) {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[feishu-user-plugin] MCP Server v1.0.0 — %d tools available', TOOLS.length);
+
+  // Startup diagnostics
+  const hasCookie = !!process.env.LARK_COOKIE;
+  const hasApp = !!(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
+  const hasUAT = !!process.env.LARK_USER_ACCESS_TOKEN;
+  console.error(`[feishu-user-plugin] MCP Server v1.0.1 — ${TOOLS.length} tools`);
+  console.error(`[feishu-user-plugin] Auth: Cookie=${hasCookie ? 'YES' : 'NO'} App=${hasApp ? 'YES' : 'NO'} UAT=${hasUAT ? 'YES' : 'NO'}`);
+  if (!hasCookie) console.error('[feishu-user-plugin] WARNING: LARK_COOKIE not set — user identity tools (send_to_user, etc.) will fail');
+  if (!hasApp) console.error('[feishu-user-plugin] WARNING: LARK_APP_ID/SECRET not set — official API tools (read_messages, docs, etc.) will fail');
+  if (!hasUAT) console.error('[feishu-user-plugin] WARNING: LARK_USER_ACCESS_TOKEN not set — P2P chat reading (read_p2p_messages) will fail');
 }
 
 main().catch(console.error);

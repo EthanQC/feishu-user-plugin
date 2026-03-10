@@ -15,7 +15,7 @@ The only MCP server that lets you send messages as your **personal identity** (n
 - **Send as yourself** -- Messages show your real name, not a bot. Supports text, rich text, images, files, stickers, and audio.
 - **Read everything** -- Group chats via bot API, P2P (direct messages) via OAuth UAT.
 - **Full Feishu suite** -- Docs, Bitable (spreadsheets), Wiki, Drive, Contacts -- all in one plugin.
-- **3 auth layers** -- Cookie-based user identity, app credentials (Official API), and OAuth UAT (P2P reading). Each is independent; configure only what you need.
+- **3 auth layers** -- Cookie-based user identity, app credentials (Official API), and OAuth UAT (P2P reading). All three are needed for full functionality.
 - **8 slash commands** for Claude Code -- `/send`, `/reply`, `/search`, `/digest`, `/doc`, `/table`, `/wiki`, `/status`
 - **Auto session management** -- Cookie heartbeat every 4h, UAT auto-refresh with token rotation.
 - **Chat name resolution** -- Pass a group name instead of `oc_xxx` ID; it resolves automatically.
@@ -110,11 +110,9 @@ Add your bot to the group chats where you want it to read messages. The bot can 
 | `LARK_APP_ID` | Official API tools | App ID from Feishu Open Platform. Needed for `read_messages`, docs, tables, wiki, drive. |
 | `LARK_APP_SECRET` | Official API tools | App Secret from Feishu Open Platform. Used together with `LARK_APP_ID`. |
 | `LARK_USER_ACCESS_TOKEN` | P2P chat reading | OAuth user token. Needed for `read_p2p_messages` and `list_user_chats`. Obtained via `node src/oauth.js`. |
+| `LARK_USER_REFRESH_TOKEN` | UAT auto-refresh | Refresh token for automatic UAT renewal. Obtained together with UAT via OAuth flow. |
 
-Each auth layer is independent. You can configure:
-- **Cookie only** -- for sending messages as yourself
-- **App credentials only** -- for reading docs, tables, wiki, group chats
-- **All three** -- for the full feature set
+All five variables are required for full functionality. Configure all of them during setup.
 
 ## How to Get Your Cookie
 
@@ -147,9 +145,9 @@ Claude Code will automatically:
 
 > The server automatically refreshes the session via heartbeat every 4 hours. The `sl_session` cookie has a 12-hour max-age.
 
-## How to Set Up P2P Chat Reading (OAuth)
+## Set Up OAuth (Required for P2P Chat Reading)
 
-To read direct message history with `read_p2p_messages` and `list_user_chats`:
+To enable `read_p2p_messages` and `list_user_chats`:
 
 1. Your Feishu app must be a **Custom App** (自建应用), NOT marketplace/third-party
 2. Add scopes: `im:message`, `im:message:readonly`, `im:chat:readonly`
@@ -166,7 +164,7 @@ cd $(npm root -g)/feishu-user-plugin && node src/oauth.js
 # Or clone the repo just for the OAuth step, then use npx for daily use
 ```
 
-A browser window will open for OAuth consent. The token is saved to `.env` automatically and auto-refreshes at runtime. Add the resulting `LARK_USER_ACCESS_TOKEN` to your `.mcp.json` env.
+A browser window will open for OAuth consent. The token is saved to `.env` automatically and auto-refreshes at runtime. Add both `LARK_USER_ACCESS_TOKEN` and `LARK_USER_REFRESH_TOKEN` from `.env` to your MCP config's `env` section.
 
 ## MCP Client Configuration
 
@@ -185,7 +183,9 @@ Add to your project's `.mcp.json` (or `~/.claude/.mcp.json` for global):
       "env": {
         "LARK_COOKIE": "your-cookie-string",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "your-app-secret"
+        "LARK_APP_SECRET": "your-app-secret",
+        "LARK_USER_ACCESS_TOKEN": "your-uat",
+        "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
       }
     }
   }
@@ -203,7 +203,9 @@ Add to your project's `.mcp.json` (or `~/.claude/.mcp.json` for global):
       "env": {
         "LARK_COOKIE": "your-cookie-string",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "your-app-secret"
+        "LARK_APP_SECRET": "your-app-secret",
+        "LARK_USER_ACCESS_TOKEN": "your-uat",
+        "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
       }
     }
   }
@@ -228,7 +230,9 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
       "env": {
         "LARK_COOKIE": "your-cookie-string",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "your-app-secret"
+        "LARK_APP_SECRET": "your-app-secret",
+        "LARK_USER_ACCESS_TOKEN": "your-uat",
+        "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
       }
     }
   }
@@ -248,7 +252,9 @@ Add to `.cursor/mcp.json` in your project:
       "env": {
         "LARK_COOKIE": "your-cookie-string",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "your-app-secret"
+        "LARK_APP_SECRET": "your-app-secret",
+        "LARK_USER_ACCESS_TOKEN": "your-uat",
+        "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
       }
     }
   }
@@ -269,7 +275,9 @@ Add to `.vscode/mcp.json` in your project:
       "env": {
         "LARK_COOKIE": "your-cookie-string",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "your-app-secret"
+        "LARK_APP_SECRET": "your-app-secret",
+        "LARK_USER_ACCESS_TOKEN": "your-uat",
+        "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
       }
     }
   }
@@ -289,7 +297,9 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
       "env": {
         "LARK_COOKIE": "your-cookie-string",
         "LARK_APP_ID": "cli_xxxxxxxxxxxx",
-        "LARK_APP_SECRET": "your-app-secret"
+        "LARK_APP_SECRET": "your-app-secret",
+        "LARK_USER_ACCESS_TOKEN": "your-uat",
+        "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
       }
     }
   }
