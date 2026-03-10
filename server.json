@@ -1,8 +1,8 @@
 {
   "name": "feishu-user-plugin",
   "display_name": "Feishu User Plugin for Claude Code",
-  "description": "All-in-one Feishu plugin — send messages as yourself, read chats, manage docs/tables/wiki. 33 tools + 8 skills, 3 auth layers.",
-  "version": "1.0.0",
+  "description": "All-in-one Feishu plugin — send messages as yourself, read chats, manage docs/tables/wiki. 33 tools + 9 skills, 3 auth layers.",
+  "version": "1.0.1",
   "icon": "https://www.feishu.cn/favicon.ico",
   "repository": {
     "type": "git",
@@ -26,7 +26,7 @@
     { "name": "get_user_info", "description": "Look up user display name by ID" },
     { "name": "get_login_status", "description": "Check cookie, app credentials, and UAT status" },
     { "name": "read_p2p_messages", "description": "Read P2P chat history via OAuth UAT" },
-    { "name": "list_user_chats", "description": "List all chats the user is in (including P2P)" },
+    { "name": "list_user_chats", "description": "List group chats the user is in (groups only, not P2P)" },
     { "name": "list_chats", "description": "List all chats the bot has joined" },
     { "name": "read_messages", "description": "Read message history (accepts chat name or oc_ ID)" },
     { "name": "reply_message", "description": "Reply to a specific message (as bot)" },
@@ -71,8 +71,13 @@
     },
     {
       "name": "LARK_USER_ACCESS_TOKEN",
-      "description": "OAuth user_access_token for P2P chat reading (optional, run: node src/oauth.js)",
-      "required": false
+      "description": "OAuth user_access_token for P2P chat reading (run: node src/oauth.js)",
+      "required": true
+    },
+    {
+      "name": "LARK_USER_REFRESH_TOKEN",
+      "description": "OAuth refresh_token for automatic UAT renewal (obtained via OAuth flow)",
+      "required": true
     }
   ]
 }

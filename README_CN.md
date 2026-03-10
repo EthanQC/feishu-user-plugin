@@ -8,7 +8,7 @@
 
 [English](README.md) | **中文**
 
-**全能飞书 MCP 服务器 — 33 个工具，8 个技能，三层认证，覆盖消息、文档、多维表格、知识库和云盘。**
+**全能飞书 MCP 服务器 — 33 个工具，9 个技能，三层认证，覆盖消息、文档、多维表格、知识库和云盘。**
 
 唯一支持以**你的真实身份**（而非机器人）发送飞书消息的 MCP 服务器，同时集成飞书官方 API 的全部能力。
 
@@ -64,7 +64,7 @@
 | 工具 | 说明 |
 |------|------|
 | `read_p2p_messages` | 读取私聊（单聊）消息历史，可访问机器人无法进入的会话 |
-| `list_user_chats` | 列出用户参与的所有会话，包括私聊 |
+| `list_user_chats` | 列出用户参与的群聊（仅群聊，不含私聊） |
 
 ### 官方 API — 即时消息（Bot 身份）
 
@@ -228,8 +228,15 @@ node src/test-all.js               # 运行完整测试
 {
   "mcpServers": {
     "feishu-user-plugin": {
-      "command": "node",
-      "args": ["/绝对路径/feishu-user-plugin/src/index.js"]
+      "command": "npx",
+      "args": ["-y", "feishu-user-plugin"],
+      "env": {
+        "LARK_COOKIE": "你的飞书Cookie",
+        "LARK_APP_ID": "cli_xxxxxxxxxxxx",
+        "LARK_APP_SECRET": "你的应用密钥",
+        "LARK_USER_ACCESS_TOKEN": "你的UAT",
+        "LARK_USER_REFRESH_TOKEN": "你的RefreshToken"
+      }
     }
   }
 }
@@ -246,7 +253,7 @@ node src/test-all.js               # 运行完整测试
 
 ## Claude Code 技能
 
-插件内置 8 个技能（`skills/feishu-user-plugin/`）：
+插件内置 9 个技能（`skills/feishu-user-plugin/`）：
 
 | 技能 | 用法 | 说明 |
 |------|------|------|
@@ -257,6 +264,7 @@ node src/test-all.js               # 运行完整测试
 | `/doc` | `/doc search MCP` | 搜索、读取或创建文档 |
 | `/table` | `/table query appXxx` | 查询或创建多维表格记录 |
 | `/wiki` | `/wiki search 协议` | 搜索和浏览知识库 |
+| `/drive` | `/drive list folderToken` | 列出文件或创建云盘文件夹 |
 | `/status` | `/status` | 检查登录和认证状态 |
 
 安装插件后技能自动可用。
@@ -306,7 +314,7 @@ feishu-user-plugin/
 ├── skills/
 │   └── feishu-user-plugin/
 │       ├── SKILL.md         # 主技能定义（触发条件、工具、认证）
-│       └── references/      # 8 个技能参考文档 + CLAUDE.md
+│       └── references/      # 9 个技能参考文档 + CLAUDE.md
 ├── src/
 │   ├── index.js             # MCP 服务器入口（33 个工具）
 │   ├── client.js            # 用户身份客户端（Protobuf 网关）

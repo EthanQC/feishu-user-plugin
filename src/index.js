@@ -490,7 +490,7 @@ const TOOLS = [
 // --- Server ---
 
 const server = new Server(
-  { name: 'feishu-user-plugin', version: '1.0.0' },
+  { name: 'feishu-user-plugin', version: '1.0.1' },
   { capabilities: { tools: {} } }
 );
 

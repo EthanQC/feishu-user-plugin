@@ -1,6 +1,6 @@
 ---
 name: feishu-user-plugin
-version: "1.0.0"
+version: "1.0.1"
 description: "All-in-one Feishu plugin — send messages as yourself, read group/P2P chats, manage docs/tables/wiki. Replaces and extends the official Feishu MCP."
 allowed-tools: send_to_user, send_to_group, send_as_user, send_image_as_user, send_file_as_user, send_post_as_user, send_sticker_as_user, send_audio_as_user, search_contacts, create_p2p_chat, get_chat_info, get_user_info, get_login_status, read_p2p_messages, list_user_chats, list_chats, read_messages, reply_message, forward_message, search_docs, read_doc, create_doc, list_bitable_tables, list_bitable_fields, search_bitable_records, create_bitable_record, update_bitable_record, list_wiki_spaces, search_wiki, list_wiki_nodes, list_files, create_folder, find_user
 user_invocable: true

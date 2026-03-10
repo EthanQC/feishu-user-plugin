@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.1] - 2026-03-10
+
+### Fixed
+- `list_user_chats` description incorrectly claimed "including P2P" — actually only returns groups
+- OAuth scope `contact:user.id:readonly` → `contact:user.base:readonly` in README
+- Cookie length validation range (500-5000, was 1000-5000)
+- Version inconsistency across `server.json`, `plugin.json`, `SKILL.md`, `src/index.js`
+- Skill count: 8 → 9 (was missing `/drive`)
+- README_CN.md Claude Desktop config missing `env` block
+
+### Added
+- Startup auth diagnostics in `src/index.js` (Cookie/App/UAT status logging)
+- `LARK_USER_REFRESH_TOKEN` to all MCP config examples
+- Troubleshooting for `invalid_grant` errors (28003/20003/20005)
+- Troubleshooting for `oauth.js` requiring APP_ID/SECRET in `.env`
+- Playwright cookie setup: two-step extraction, `clearCookies()`, ASCII validation
+- `LARK_USER_REFRESH_TOKEN` to `server.json` environment_variables
+
+### Changed
+- All 5 env vars marked as required for full functionality
+- Improved `read_p2p_messages` chat_id description (numeric + oc_xxx both accepted)
+
 ## [1.0.0] - 2026-03-09
 
 ### Changed

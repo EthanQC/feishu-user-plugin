@@ -6,7 +6,7 @@
 [![Tools](https://img.shields.io/badge/Tools-33-orange.svg)](#tools-33-total)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**All-in-one Feishu/Lark MCP Server -- 33 tools, 8 skills, 3 auth layers for messaging, docs, tables, wiki, and drive.**
+**All-in-one Feishu/Lark MCP Server -- 33 tools, 9 skills, 3 auth layers for messaging, docs, tables, wiki, and drive.**
 
 The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API for documents, spreadsheets, wikis, and more.
 
@@ -82,7 +82,7 @@ Go to **Permissions & Scopes** (权限管理) and add the following scopes:
 | `bitable:record` | Read and write Bitable records |
 | `wiki:wiki:readonly` | Read wiki spaces and nodes |
 | `drive:drive:readonly` | List Drive files and folders |
-| `contact:user.id:readonly` | Look up users by email/mobile |
+| `contact:user.base:readonly` | Look up users by email/mobile |
 
 > Add more scopes as needed depending on which tools you use.
 
@@ -338,7 +338,7 @@ Send messages as yourself, not as a bot.
 | Tool | Description |
 |------|-------------|
 | `read_p2p_messages` | Read P2P (direct message) history. Works for chats the bot cannot access. |
-| `list_user_chats` | List all chats the user is in, including P2P. |
+| `list_user_chats` | List group chats the user is in. Note: only returns groups, not P2P. |
 
 ### Official API -- IM (Bot Identity)
 
@@ -388,9 +388,9 @@ Send messages as yourself, not as a bot.
 |------|-------------|
 | `find_user` | Find user by email or mobile number |
 
-## Claude Code Slash Commands (8 skills)
+## Claude Code Slash Commands (9 skills)
 
-This plugin includes 8 built-in skills in `skills/feishu-user-plugin/`:
+This plugin includes 9 built-in skills in `skills/feishu-user-plugin/`:
 
 | Skill | Usage | Description |
 |-------|-------|-------------|
@@ -401,6 +401,7 @@ This plugin includes 8 built-in skills in `skills/feishu-user-plugin/`:
 | `/doc` | `/doc search MCP` | Search, read, or create documents |
 | `/table` | `/table query appXxx` | Query or create Bitable records |
 | `/wiki` | `/wiki search protocol` | Search and browse wiki |
+| `/drive` | `/drive list folderToken` | List files or create folders in Drive |
 | `/status` | `/status` | Check login and auth status |
 
 Skills are automatically available when the plugin is installed.
