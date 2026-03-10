@@ -490,7 +490,7 @@ const TOOLS = [
 // --- Server ---
 
 const server = new Server(
-  { name: 'feishu-user-plugin', version: '1.0.1' },
+  { name: 'feishu-user-plugin', version: '1.0.2' },
   { capabilities: { tools: {} } }
 );
 
@@ -696,7 +696,7 @@ async function main() {
   const hasCookie = !!process.env.LARK_COOKIE;
   const hasApp = !!(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
   const hasUAT = !!process.env.LARK_USER_ACCESS_TOKEN;
-  console.error(`[feishu-user-plugin] MCP Server v1.0.1 — ${TOOLS.length} tools`);
+  console.error(`[feishu-user-plugin] MCP Server v1.0.2 — ${TOOLS.length} tools`);
   console.error(`[feishu-user-plugin] Auth: Cookie=${hasCookie ? 'YES' : 'NO'} App=${hasApp ? 'YES' : 'NO'} UAT=${hasUAT ? 'YES' : 'NO'}`);
   if (!hasCookie) console.error('[feishu-user-plugin] WARNING: LARK_COOKIE not set — user identity tools (send_to_user, etc.) will fail');
   if (!hasApp) console.error('[feishu-user-plugin] WARNING: LARK_APP_ID/SECRET not set — official API tools (read_messages, docs, etc.) will fail');
