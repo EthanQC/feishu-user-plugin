@@ -2,33 +2,31 @@
 /**
  * OAuth 授权脚本 — 获取带 IM 权限的 user_access_token
  *
- * 用法: node src/oauth.js
+ * 用法: npx feishu-user-plugin oauth
  *
  * 流程 (新版 End User Consent):
  * 1. 查询应用信息，提示用户选择正确的飞书账号
  * 2. 启动本地 HTTP 服务器 (端口 9997)
  * 3. 打开 accounts.feishu.cn 授权页面 (新版 OAuth 2.0)
  * 4. 用户点击"授权"后，用 /authen/v2/oauth/token 交换 token
- * 5. 保存 access_token + refresh_token 到 .env
+ * 5. 保存 token 到 MCP 配置文件
  */
 
 const http = require('http');
 const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const dotenv = require('dotenv');
+const { readCredentials, persistToConfig } = require('./config');
 
-dotenv.config({ path: path.join(__dirname, '..', '.env') });
-
-const APP_ID = process.env.LARK_APP_ID;
-const APP_SECRET = process.env.LARK_APP_SECRET;
+const creds = readCredentials();
+const APP_ID = creds.LARK_APP_ID;
+const APP_SECRET = creds.LARK_APP_SECRET;
 const PORT = 9997;
 const REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`;
 // offline_access is required to get refresh_token for auto-renewal
 const SCOPES = 'offline_access im:message im:message:readonly im:chat:readonly contact:user.base:readonly';
 
 if (!APP_ID || !APP_SECRET) {
-  console.error('Missing LARK_APP_ID or LARK_APP_SECRET in .env');
+  console.error('Missing LARK_APP_ID or LARK_APP_SECRET.');
+  console.error('Run "npx feishu-user-plugin setup" first to configure app credentials.');
   process.exit(1);
 }
 
@@ -100,10 +98,6 @@ async function exchangeCode(code) {
 }
 
 function saveToken(tokenData) {
-  const envPath = path.join(__dirname, '..', '.env');
-  let envContent = '';
-  try { envContent = fs.readFileSync(envPath, 'utf8'); } catch {}
-
   const updates = {
     LARK_USER_ACCESS_TOKEN: tokenData.access_token,
     LARK_USER_REFRESH_TOKEN: tokenData.refresh_token || '',
@@ -111,44 +105,13 @@ function saveToken(tokenData) {
     LARK_UAT_EXPIRES: String(Math.floor(Date.now() / 1000 + (typeof tokenData.expires_in === 'number' && tokenData.expires_in > 0 ? tokenData.expires_in : 7200))),
   };
 
-  for (const [key, val] of Object.entries(updates)) {
-    const regex = new RegExp(`^${key}=.*$`, 'm');
-    if (regex.test(envContent)) {
-      envContent = envContent.replace(regex, `${key}=${val}`);
-    } else {
-      envContent += `\n${key}=${val}`;
+  const ok = persistToConfig(updates);
+  if (!ok) {
+    console.error('WARNING: Tokens could not be saved to config. Copy them manually:');
+    for (const [k, v] of Object.entries(updates)) {
+      console.error(`  ${k}=${v}`);
     }
   }
-
-  fs.writeFileSync(envPath, envContent.trim() + '\n');
-
-  // Also persist to ~/.claude.json MCP config so MCP restart picks up tokens immediately
-  _persistToClaudeJson(updates);
-}
-
-function _persistToClaudeJson(updates) {
-  const claudeJsonPaths = [
-    path.join(process.env.HOME || '', '.claude.json'),
-    path.join(process.env.HOME || '', '.claude', '.claude.json'),
-  ];
-  for (const cjPath of claudeJsonPaths) {
-    try {
-      const raw = fs.readFileSync(cjPath, 'utf8');
-      const config = JSON.parse(raw);
-      const servers = config.mcpServers || {};
-      for (const name of ['feishu-user-plugin', 'feishu']) {
-        if (servers[name]?.env) {
-          Object.assign(servers[name].env, updates);
-          fs.writeFileSync(cjPath, JSON.stringify(config, null, 2) + '\n');
-          console.log(`[feishu-user-plugin] OAuth tokens persisted to ${cjPath}`);
-          return;
-        }
-      }
-    } catch (e) {
-      console.error(`[feishu-user-plugin] Failed to persist tokens to ${cjPath}: ${e.message}`);
-    }
-  }
-  console.error('[feishu-user-plugin] WARNING: Could not persist tokens to ~/.claude.json. Tokens saved to .env only — copy them to your MCP config manually.');
 }
 
 const server = http.createServer(async (req, res) => {
@@ -173,7 +136,7 @@ const server = http.createServer(async (req, res) => {
 <p>scope: ${tokenData.scope}</p>
 <p>expires_in: ${tokenData.expires_in}s</p>
 <p>refresh_token: ${hasRefresh ? '✅ 已获取（30天有效，支持自动续期）' : '❌ 未返回（token 将在 2 小时后过期，需重新授权）'}</p>
-<p>已保存到 .env，可以关闭此页面。</p>`);
+<p>已保存到 MCP 配置文件，可以关闭此页面。</p>`);
 
       console.log('\n=== OAuth 授权成功 ===');
       console.log('scope:', tokenData.scope);
@@ -185,7 +148,7 @@ const server = http.createServer(async (req, res) => {
         console.log('   - 授权时 scope 中未包含 offline_access');
         console.log('   Token 将在 2 小时后过期，届时需要重新运行此脚本。');
       }
-      console.log('token 已保存到 .env');
+      console.log('token 已保存到 MCP 配置文件');
 
       setTimeout(() => { server.close(); process.exit(0); }, 1000);
     } catch (e) {

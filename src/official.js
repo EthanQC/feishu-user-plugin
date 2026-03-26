@@ -66,68 +66,12 @@ class LarkOfficialClient {
   }
 
   _persistUAT() {
-    const fs = require('fs');
-    const path = require('path');
-    const updates = {
+    const { persistToConfig } = require('./config');
+    persistToConfig({
       LARK_USER_ACCESS_TOKEN: this._uat,
       LARK_USER_REFRESH_TOKEN: this._uatRefresh,
       LARK_UAT_EXPIRES: String(this._uatExpires),
-    };
-
-    // Strategy 1: Update ~/.claude.json MCP config (works for npx users)
-    const claudeJsonPaths = [
-      path.join(process.env.HOME || '', '.claude.json'),
-      path.join(process.env.HOME || '', '.claude', '.claude.json'),
-    ];
-    for (const cjPath of claudeJsonPaths) {
-      try {
-        const raw = fs.readFileSync(cjPath, 'utf8');
-        const config = JSON.parse(raw);
-        const servers = config.mcpServers || {};
-        // Find our server entry by name
-        for (const name of ['feishu-user-plugin', 'feishu']) {
-          if (servers[name]?.env) {
-            Object.assign(servers[name].env, updates);
-            fs.writeFileSync(cjPath, JSON.stringify(config, null, 2) + '\n');
-            console.error('[feishu-user-plugin] UAT persisted to', cjPath);
-            return;
-          }
-        }
-      } catch {}
-    }
-
-    // Strategy 2: Update project .mcp.json
-    const mcpJsonPaths = [
-      path.join(process.cwd(), '.mcp.json'),
-    ];
-    for (const mjPath of mcpJsonPaths) {
-      try {
-        const raw = fs.readFileSync(mjPath, 'utf8');
-        const config = JSON.parse(raw);
-        const servers = config.mcpServers || config;
-        for (const name of ['feishu-user-plugin', 'feishu']) {
-          if (servers[name]?.env) {
-            Object.assign(servers[name].env, updates);
-            fs.writeFileSync(mjPath, JSON.stringify(config, null, 2) + '\n');
-            console.error('[feishu-user-plugin] UAT persisted to', mjPath);
-            return;
-          }
-        }
-      } catch {}
-    }
-
-    // Strategy 3: Fallback to .env in project root (for local dev)
-    const envPath = path.join(__dirname, '..', '.env');
-    try {
-      let env = '';
-      try { env = fs.readFileSync(envPath, 'utf8'); } catch {}
-      for (const [key, val] of Object.entries(updates)) {
-        const regex = new RegExp(`^${key}=.*$`, 'm');
-        if (regex.test(env)) env = env.replace(regex, `${key}=${val}`);
-        else env += `\n${key}=${val}`;
-      }
-      fs.writeFileSync(envPath, env.trim() + '\n');
-    } catch {}
+    });
   }
 
   // --- UAT-based IM operations (for P2P chats) ---

@@ -59,14 +59,22 @@ Quick Start (external users):
 async function checkStatus() {
   const { LarkUserClient } = require('./client');
   const { LarkOfficialClient } = require('./official');
-  const path = require('path');
-  require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+  const { findMcpConfig } = require('./config');
+
+  const found = findMcpConfig();
+  const creds = found ? found.serverEnv : {};
 
   console.log('=== feishu-user-plugin Auth Status ===\n');
+  if (found) {
+    console.log(`Config: ${found.configPath}${found.projectPath ? ` (project: ${found.projectPath})` : ''}`);
+  } else {
+    console.log('Config: NOT FOUND (run: npx feishu-user-plugin setup)');
+  }
+  console.log('');
 
   // Cookie
-  const cookie = process.env.LARK_COOKIE;
-  if (cookie) {
+  const cookie = creds.LARK_COOKIE;
+  if (cookie && cookie !== 'SETUP_NEEDED') {
     try {
       const client = new LarkUserClient(cookie);
       await client.init();
@@ -79,21 +87,23 @@ async function checkStatus() {
   }
 
   // App credentials
-  const appId = process.env.LARK_APP_ID;
-  const appSecret = process.env.LARK_APP_SECRET;
+  const appId = creds.LARK_APP_ID;
+  const appSecret = creds.LARK_APP_SECRET;
   console.log(`App credentials: ${appId && appSecret ? 'OK' : 'NOT SET'}`);
 
   // UAT
-  const uat = process.env.LARK_USER_ACCESS_TOKEN;
-  const rt = process.env.LARK_USER_REFRESH_TOKEN;
-  if (uat) {
+  const uat = creds.LARK_USER_ACCESS_TOKEN;
+  const rt = creds.LARK_USER_REFRESH_TOKEN;
+  if (uat && uat !== 'SETUP_NEEDED') {
     console.log(`UAT: SET (refresh_token: ${rt ? 'YES' : 'NO'})`);
     if (appId && appSecret) {
       const official = new LarkOfficialClient(appId, appSecret);
-      official.loadUAT();
+      official._uat = uat;
+      official._uatRefresh = rt || null;
+      official._uatExpires = parseInt(creds.LARK_UAT_EXPIRES || '0');
       try {
-        const chats = await official.listChatsAsUser({ pageSize: 1 });
-        console.log(`  UAT test: OK (can list chats)`);
+        const result = await official.listChatsAsUser({ pageSize: 1 });
+        console.log('  UAT test: OK (can list chats)');
       } catch (e) {
         console.log(`  UAT test: FAILED — ${e.message}`);
       }

@@ -9,11 +9,11 @@
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { findMcpConfig, writeNewConfig } = require('./config');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise(resolve => rl.question(q, resolve));
 
-const CLAUDE_JSON_PATH = path.join(process.env.HOME || '', '.claude.json');
 const SERVER_NAME = 'feishu-user-plugin';
 
 async function main() {
@@ -23,22 +23,18 @@ async function main() {
   console.log('');
 
   // Check existing config
-  let config = {};
   let existingEnv = {};
-  try {
-    config = JSON.parse(fs.readFileSync(CLAUDE_JSON_PATH, 'utf8'));
-    const existing = config.mcpServers?.[SERVER_NAME]?.env || config.mcpServers?.feishu?.env;
-    if (existing) {
-      existingEnv = existing;
-      console.log('Found existing feishu-user-plugin config in ~/.claude.json');
-      const update = await ask('Update existing config? (Y/n): ');
-      if (update.toLowerCase() === 'n') {
-        console.log('Cancelled.');
-        rl.close();
-        return;
-      }
+  const found = findMcpConfig();
+  if (found) {
+    existingEnv = found.serverEnv;
+    console.log(`Found existing config in ${found.configPath}`);
+    const update = await ask('Update existing config? (Y/n): ');
+    if (update.toLowerCase() === 'n') {
+      console.log('Cancelled.');
+      rl.close();
+      return;
     }
-  } catch {}
+  }
 
   // Collect credentials
   console.log('\n--- App Credentials ---');
@@ -121,37 +117,19 @@ async function main() {
   // Write config
   console.log('\n--- Writing Config ---');
 
-  if (!config.mcpServers) config.mcpServers = {};
-  config.mcpServers[SERVER_NAME] = {
-    command: 'npx',
-    args: ['-y', 'feishu-user-plugin'],
-    env: {
-      LARK_COOKIE: cookie,
-      LARK_APP_ID: appId,
-      LARK_APP_SECRET: appSecret,
-      LARK_USER_ACCESS_TOKEN: hasUAT ? existingUAT : 'SETUP_NEEDED',
-      LARK_USER_REFRESH_TOKEN: hasUAT ? (existingRT || '') : '',
-    },
+  const env = {
+    LARK_COOKIE: cookie,
+    LARK_APP_ID: appId,
+    LARK_APP_SECRET: appSecret,
+    LARK_USER_ACCESS_TOKEN: hasUAT ? existingUAT : 'SETUP_NEEDED',
+    LARK_USER_REFRESH_TOKEN: hasUAT ? (existingRT || '') : '',
   };
 
-  // Remove old 'feishu' entry if exists (consolidate)
-  if (config.mcpServers.feishu && config.mcpServers[SERVER_NAME]) {
-    delete config.mcpServers.feishu;
-  }
-
-  fs.writeFileSync(CLAUDE_JSON_PATH, JSON.stringify(config, null, 2) + '\n');
-  console.log(`Written to ${CLAUDE_JSON_PATH}`);
-
-  // Also write .env for oauth.js to use
-  const envPath = path.join(__dirname, '..', '.env');
-  const envContent = [
-    `LARK_APP_ID=${appId}`,
-    `LARK_APP_SECRET=${appSecret}`,
-    cookie !== 'SETUP_NEEDED' ? `LARK_COOKIE=${cookie}` : '',
-    hasUAT ? `LARK_USER_ACCESS_TOKEN=${existingUAT}` : '',
-    hasUAT && existingRT ? `LARK_USER_REFRESH_TOKEN=${existingRT}` : '',
-  ].filter(Boolean).join('\n') + '\n';
-  fs.writeFileSync(envPath, envContent);
+  // If we found an existing config, write to the same file (preserving project-level nesting)
+  const targetPath = found ? found.configPath : undefined;
+  const projPath = found ? found.projectPath : undefined;
+  const result = writeNewConfig(env, targetPath, projPath);
+  console.log(`Written to ${result.configPath}`);
 
   // Summary
   console.log('\n' + '='.repeat(60));
