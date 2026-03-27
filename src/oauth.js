@@ -163,6 +163,16 @@ const server = http.createServer(async (req, res) => {
   res.end('Not found');
 });
 
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nPort ${PORT} is already in use. Another OAuth process may be running.`);
+    console.error('Wait a minute and try again, or kill the process using the port.');
+  } else {
+    console.error('Server error:', e.message);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, '127.0.0.1', async () => {
   const authUrl = `https://accounts.feishu.cn/open-apis/authen/v1/authorize?client_id=${APP_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(SCOPES)}`;
 
@@ -192,7 +202,8 @@ server.listen(PORT, '127.0.0.1', async () => {
   console.log('授权 URL:', authUrl);
 
   try {
-    execSync(`open "${authUrl}"`);
+    const openCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+    execSync(`${openCmd} "${authUrl}"`);
   } catch {
     console.log('\n请手动在浏览器中打开上面的 URL');
   }

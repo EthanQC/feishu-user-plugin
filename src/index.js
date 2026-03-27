@@ -397,6 +397,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'get_doc_blocks',
+    description: '[Official API] Get structured block tree of a document. Returns block types, content, and hierarchy for precise document analysis.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'Document ID (from search_docs or create_doc)' },
+      },
+      required: ['document_id'],
+    },
+  },
+  {
     name: 'create_doc',
     description: '[Official API] Create a new Feishu document.',
     inputSchema: {
@@ -573,8 +584,13 @@ async function handleTool(name, args) {
     case 'send_to_user': {
       const c = await getUserClient();
       const results = await c.search(args.user_name);
-      const user = results.find(r => r.type === 'user');
-      if (!user) return text(`User "${args.user_name}" not found. Results: ${JSON.stringify(results)}`);
+      const users = results.filter(r => r.type === 'user');
+      if (users.length === 0) return text(`User "${args.user_name}" not found. Results: ${JSON.stringify(results)}`);
+      if (users.length > 1) {
+        const candidates = users.slice(0, 5).map(u => `  - ${u.title} (ID: ${u.id})`).join('\n');
+        return text(`Multiple users match "${args.user_name}":\n${candidates}\nUse search_contacts to find the exact user, then create_p2p_chat + send_as_user.`);
+      }
+      const user = users[0];
       const chatId = await c.createChat(user.id);
       if (!chatId) return text(`Failed to create chat with ${user.title}`);
       const r = await c.sendMessage(chatId, args.text);
@@ -583,8 +599,13 @@ async function handleTool(name, args) {
     case 'send_to_group': {
       const c = await getUserClient();
       const results = await c.search(args.group_name);
-      const group = results.find(r => r.type === 'group');
-      if (!group) return text(`Group "${args.group_name}" not found. Results: ${JSON.stringify(results)}`);
+      const groups = results.filter(r => r.type === 'group');
+      if (groups.length === 0) return text(`Group "${args.group_name}" not found. Results: ${JSON.stringify(results)}`);
+      if (groups.length > 1) {
+        const candidates = groups.slice(0, 5).map(g => `  - ${g.title} (ID: ${g.id})`).join('\n');
+        return text(`Multiple groups match "${args.group_name}":\n${candidates}\nUse search_contacts to find the exact group, then send_as_user with the ID.`);
+      }
+      const group = groups[0];
       const r = await c.sendMessage(group.id, args.text);
       return sendResult(r, `Text sent to group "${group.title}" (${group.id})`);
     }
@@ -635,20 +656,16 @@ async function handleTool(name, args) {
     }
     case 'get_user_info': {
       let n = null;
-      // Strategy 1: User identity client cache
+      // Strategy 1: Official API contact lookup (works for same-tenant users by open_id)
       try {
-        const c = await getUserClient();
-        n = await c.getUserName(args.user_id);
-        if (!n && args.user_id) {
-          await c.search(args.user_id);
-          n = await c.getUserName(args.user_id);
-        }
+        const official = getOfficialClient();
+        n = await official.getUserById(args.user_id, 'open_id');
       } catch {}
-      // Strategy 2: Official API contact lookup (works for same-tenant users)
+      // Strategy 2: User identity client cache (populated by previous search/init calls)
       if (!n) {
         try {
-          const official = getOfficialClient();
-          n = await official.getUserById(args.user_id, 'open_id');
+          const c = await getUserClient();
+          n = await c.getUserName(args.user_id);
         } catch {}
       }
       return text(n ? `User ${args.user_id}: ${n}` : `Could not resolve user ${args.user_id}. This user may be from an external tenant. Try search_contacts with the user's display name instead.`);
@@ -674,7 +691,8 @@ async function handleTool(name, args) {
       const official = getOfficialClient();
       let chatId = args.chat_id;
       let uc = null;
-      try { uc = await getUserClient(); } catch (_) {}
+      let ucError = null;
+      try { uc = await getUserClient(); } catch (e) { ucError = e; }
       // If chat_id is not numeric or oc_, try to resolve as user name → P2P chat
       if (!/^\d+$/.test(chatId) && !chatId.startsWith('oc_')) {
         if (uc) {
@@ -691,7 +709,8 @@ async function handleTool(name, args) {
             else return text(`Cannot resolve "${args.chat_id}" to a chat. Use search_contacts to find the ID first.`);
           }
         } else {
-          return text(`"${args.chat_id}" is not a valid chat ID. Provide a numeric ID or oc_xxx format. Use search_contacts + create_p2p_chat to get the ID.`);
+          const hint = ucError ? `Cookie auth failed: ${ucError.message}. Fix LARK_COOKIE first, or p` : 'P';
+          return text(`"${args.chat_id}" is not a valid chat ID. ${hint}rovide a numeric ID or oc_xxx format. Use search_contacts + create_p2p_chat to get the ID.`);
         }
       }
       return json(await official.readMessagesAsUser(chatId, {
@@ -754,6 +773,8 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().searchDocs(args.query));
     case 'read_doc':
       return json(await getOfficialClient().readDoc(args.document_id));
+    case 'get_doc_blocks':
+      return json(await getOfficialClient().getDocBlocks(args.document_id));
     case 'create_doc':
       return text(`Document created: ${(await getOfficialClient().createDoc(args.title, args.folder_id)).documentId}`);
 

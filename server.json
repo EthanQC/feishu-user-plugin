@@ -2,7 +2,7 @@
   "name": "feishu-user-plugin",
   "display_name": "Feishu User Plugin for Claude Code",
   "description": "All-in-one Feishu plugin — send messages as yourself, read chats, manage docs/tables/wiki. 33 tools + 9 skills, 3 auth layers.",
-  "version": "1.1.3",
+  "version": "1.2.0",
   "icon": "https://www.feishu.cn/favicon.ico",
   "repository": {
     "type": "git",

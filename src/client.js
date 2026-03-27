@@ -255,7 +255,8 @@ class LarkUserClient {
           const propBuf = this._encode('TextProperty', { content: elem.userId });
           dictionary[elemId] = { tag: 5, property: propBuf };
         } else if (elem.tag === 'a') {
-          const propBuf = this._encode('TextProperty', { content: elem.text || elem.href });
+          // Link element: content stores the URL, display text goes through innerText
+          const propBuf = this._encode('TextProperty', { content: elem.href || elem.text || '' });
           dictionary[elemId] = { tag: 6, property: propBuf };
         }
       }

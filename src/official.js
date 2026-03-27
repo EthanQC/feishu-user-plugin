@@ -387,9 +387,9 @@ class LarkOfficialClient {
         unknownIds.add(item.senderId);
       }
     }
-    // Batch resolve via official contact API
-    for (const id of unknownIds) {
-      await this.getUserById(id);
+    // Parallel resolve via official contact API (instead of sequential N calls)
+    if (unknownIds.size > 0) {
+      await Promise.allSettled([...unknownIds].map(id => this.getUserById(id)));
     }
     // Fallback: resolve remaining unknowns via cookie-based user identity client
     if (userClient) {

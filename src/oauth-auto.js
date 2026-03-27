@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Automated OAuth flow using Playwright — single page, no extra tabs
+// DEV ONLY: Automated OAuth using local Playwright (not used in production).
+// Uses .env directly; not migrated to config module.
+// Requires: npm install playwright (not in package.json dependencies)
 const http = require('http');
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -30,7 +32,7 @@ function saveToken(tokenData) {
     LARK_USER_ACCESS_TOKEN: tokenData.access_token,
     LARK_USER_REFRESH_TOKEN: tokenData.refresh_token || '',
     LARK_UAT_SCOPE: tokenData.scope || '',
-    LARK_UAT_EXPIRES: String(Math.floor(Date.now() / 1000 + tokenData.expires_in)),
+    LARK_UAT_EXPIRES: String(Math.floor(Date.now() / 1000 + (typeof tokenData.expires_in === 'number' && tokenData.expires_in > 0 ? tokenData.expires_in : 7200))),
   };
   for (const [key, val] of Object.entries(updates)) {
     const regex = new RegExp(`^${key}=.*$`, 'm');
@@ -160,29 +162,6 @@ async function run() {
     console.log('access_token:', tokenData.access_token?.slice(0, 30) + '...');
     console.log('scope:', tokenData.scope);
     console.log('expires_in:', tokenData.expires_in, 's');
-
-    // Test P2P message reading
-    console.log('\n[test] Testing P2P message reading...');
-    const testRes = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?container_id_type=chat&container_id=oc_97a52756ee2c4351a2a86e6aa33e8ca4&page_size=2&sort_type=ByCreateTimeDesc', {
-      headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
-    });
-    const testData = await testRes.json();
-    if (testData.code === 0) {
-      console.log('[test] P2P: SUCCESS!', testData.data?.items?.length, 'messages');
-    } else {
-      console.log('[test] P2P: Error', testData.code, testData.msg);
-    }
-
-    // Test group messages
-    const grpRes = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?container_id_type=chat&container_id=oc_6ae081b457d07e9651d615493b7f1096&page_size=2&sort_type=ByCreateTimeDesc', {
-      headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
-    });
-    const grpData = await grpRes.json();
-    if (grpData.code === 0) {
-      console.log('[test] Group: SUCCESS!', grpData.data?.items?.length, 'messages');
-    } else {
-      console.log('[test] Group: Error', grpData.code, grpData.msg);
-    }
 
   } catch (e) {
     console.error('\nError:', e.message);

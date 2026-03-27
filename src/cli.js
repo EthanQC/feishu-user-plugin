@@ -98,11 +98,12 @@ async function checkStatus() {
     console.log(`UAT: SET (refresh_token: ${rt ? 'YES' : 'NO'})`);
     if (appId && appSecret) {
       const official = new LarkOfficialClient(appId, appSecret);
+      // Set UAT fields directly (bypassing loadUAT which reads from process.env)
       official._uat = uat;
       official._uatRefresh = rt || null;
       official._uatExpires = parseInt(creds.LARK_UAT_EXPIRES || '0');
       try {
-        const result = await official.listChatsAsUser({ pageSize: 1 });
+        await official.listChatsAsUser({ pageSize: 1 });
         console.log('  UAT test: OK (can list chats)');
       } catch (e) {
         console.log(`  UAT test: FAILED — ${e.message}`);
