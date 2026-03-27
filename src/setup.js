@@ -6,15 +6,11 @@
  * Does NOT require cloning the repo.
  */
 
-const fs = require('fs');
-const path = require('path');
 const readline = require('readline');
 const { findMcpConfig, writeNewConfig } = require('./config');
 
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (q) => new Promise(resolve => rl.question(q, resolve));
-
-const SERVER_NAME = 'feishu-user-plugin';
 
 async function main() {
   console.log('='.repeat(60));

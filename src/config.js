@@ -10,7 +10,8 @@ const SERVER_NAMES = ['feishu-user-plugin', 'feishu'];
 function _findInServers(servers) {
   if (!servers || typeof servers !== 'object') return null;
   for (const name of SERVER_NAMES) {
-    if (servers[name]?.env) {
+    if (servers[name]) {
+      if (!servers[name].env) servers[name].env = {};
       return { serverName: name, serverEnv: servers[name].env };
     }
   }
@@ -29,9 +30,12 @@ function _findInServers(servers) {
  * Returns { configPath, config, serverName, serverEnv, projectPath? } or null.
  */
 function findMcpConfig() {
+  const home = process.env.HOME;
   const candidates = [
-    path.join(process.env.HOME || '', '.claude.json'),
-    path.join(process.env.HOME || '', '.claude', '.claude.json'),
+    ...(home ? [
+      path.join(home, '.claude.json'),
+      path.join(home, '.claude', '.claude.json'),
+    ] : []),
     path.join(process.cwd(), '.mcp.json'),
   ];
 
@@ -61,7 +65,12 @@ function findMcpConfig() {
       if (bare) {
         return { configPath, config, ...bare, projectPath: null };
       }
-    } catch {}
+    } catch (e) {
+      // Only warn if the file exists but is invalid (not for missing files)
+      if (e.code !== 'ENOENT') {
+        console.error(`[feishu-user-plugin] Warning: Failed to parse ${configPath}: ${e.message}`);
+      }
+    }
   }
   return null;
 }
@@ -127,6 +136,16 @@ function persistToConfig(updates) {
 function writeNewConfig(env, configPath, projectPath) {
   if (!configPath) {
     configPath = path.join(process.env.HOME || '', '.claude.json');
+  }
+
+  if (projectPath) {
+    // Verify the project entry still exists; warn if it was removed between discovery and write
+    let existing = {};
+    try { existing = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch {}
+    if (!existing.projects?.[projectPath]) {
+      console.error(`[feishu-user-plugin] Warning: project entry "${projectPath}" not found in ${configPath}, writing to top-level mcpServers`);
+      projectPath = null;
+    }
   }
 
   let config = {};

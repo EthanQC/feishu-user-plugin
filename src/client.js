@@ -90,7 +90,10 @@ class LarkUserClient {
     this._heartbeatTimer = setInterval(async () => {
       try {
         await this._getCsrfToken();
-        console.error('[feishu-user-plugin] Cookie heartbeat: session refreshed');
+        // Lazy require to avoid circular dependency at module load time
+        const { persistToConfig } = require('./config');
+        persistToConfig({ LARK_COOKIE: this.cookieStr });
+        console.error('[feishu-user-plugin] Cookie heartbeat: session refreshed and persisted');
       } catch (e) {
         console.error('[feishu-user-plugin] Cookie heartbeat failed:', e.message);
       }

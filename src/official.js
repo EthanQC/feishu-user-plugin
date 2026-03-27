@@ -66,6 +66,7 @@ class LarkOfficialClient {
   }
 
   _persistUAT() {
+    // Lazy require to avoid circular dependency at module load time
     const { persistToConfig } = require('./config');
     persistToConfig({
       LARK_USER_ACCESS_TOKEN: this._uat,
