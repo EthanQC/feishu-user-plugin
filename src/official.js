@@ -77,11 +77,12 @@ class LarkOfficialClient {
 
   // --- UAT-based IM operations (for P2P chats) ---
 
-  // Wrapper: call fn with UAT, retry once after refresh if auth fails (code 99991668/99991663)
+  // Wrapper: call fn with UAT, retry once after refresh if auth fails
   async _withUAT(fn) {
     let uat = await this._getValidUAT();
     const data = await fn(uat);
-    if (data.code === 99991668 || data.code === 99991663) {
+    // Known auth error codes: 99991668 (invalid), 99991663 (expired), 99991677 (auth_expired)
+    if (data.code === 99991668 || data.code === 99991663 || data.code === 99991677) {
       // Token invalid/expired — try refresh once
       uat = await this._refreshUAT();
       return fn(uat);
