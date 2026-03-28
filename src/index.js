@@ -535,6 +535,33 @@ const TOOLS = [
     },
   },
 
+  // ========== Upload — Official API ==========
+  {
+    name: 'upload_image',
+    description: '[Official API] Upload an image file to Feishu. Returns image_key for use with send_image_as_user.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        image_path: { type: 'string', description: 'Absolute path to the image file on disk' },
+        image_type: { type: 'string', enum: ['message', 'avatar'], description: 'Image usage type (default: message)' },
+      },
+      required: ['image_path'],
+    },
+  },
+  {
+    name: 'upload_file',
+    description: '[Official API] Upload a file to Feishu. Returns file_key for use with send_file_as_user.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Absolute path to the file on disk' },
+        file_type: { type: 'string', enum: ['opus', 'mp4', 'pdf', 'doc', 'xls', 'ppt', 'stream'], description: 'File type (default: stream for generic files)' },
+        file_name: { type: 'string', description: 'Display file name (optional, defaults to basename)' },
+      },
+      required: ['file_path'],
+    },
+  },
+
   // ========== Contact — Official API ==========
   {
     name: 'find_user',
@@ -813,6 +840,17 @@ async function handleTool(name, args) {
 
     case 'find_user':
       return json(await getOfficialClient().findUserByIdentity({ emails: args.email, mobiles: args.mobile }));
+
+    // --- Upload ---
+
+    case 'upload_image': {
+      const r = await getOfficialClient().uploadImage(args.image_path, args.image_type);
+      return text(`Image uploaded: ${r.imageKey}\nUse this image_key with send_image_as_user to send it.`);
+    }
+    case 'upload_file': {
+      const r = await getOfficialClient().uploadFile(args.file_path, args.file_type, args.file_name);
+      return text(`File uploaded: ${r.fileKey}\nUse this file_key with send_file_as_user to send it.`);
+    }
 
     default:
       return text(`Unknown tool: ${name}`);

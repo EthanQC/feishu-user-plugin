@@ -177,6 +177,36 @@ class LarkOfficialClient {
     return { messageId: res.data.message_id };
   }
 
+  // --- Upload ---
+
+  async uploadImage(imagePath, imageType = 'message') {
+    const fs = require('fs');
+    const res = await this._safeSDKCall(
+      () => this.client.im.image.create({
+        data: { image_type: imageType, image: fs.createReadStream(imagePath) },
+      }),
+      'uploadImage'
+    );
+    return { imageKey: res.data.image_key };
+  }
+
+  async uploadFile(filePath, fileType = 'stream', fileName) {
+    const fs = require('fs');
+    const path = require('path');
+    if (!fileName) fileName = path.basename(filePath);
+    const res = await this._safeSDKCall(
+      () => this.client.im.file.create({
+        data: {
+          file_type: fileType,
+          file_name: fileName,
+          file: fs.createReadStream(filePath),
+        },
+      }),
+      'uploadFile'
+    );
+    return { fileKey: res.data.file_key };
+  }
+
   // --- Docs ---
 
   async searchDocs(query, { pageSize = 10, pageToken } = {}) {
