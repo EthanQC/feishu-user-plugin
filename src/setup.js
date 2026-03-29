@@ -23,8 +23,14 @@ async function main() {
   const found = findMcpConfig();
   if (found) {
     existingEnv = found.serverEnv;
-    console.log(`Found existing config in ${found.configPath}`);
-    const update = await ask('Update existing config? (Y/n): ');
+    if (found.projectPath) {
+      console.log(`Found project-level config in ${found.configPath} (project: ${found.projectPath})`);
+      console.log('This setup will write to global config instead (recommended).');
+      console.log('You can remove the project-level entry later to avoid conflicts.\n');
+    } else {
+      console.log(`Found existing config in ${found.configPath}`);
+    }
+    const update = await ask('Update config? (Y/n): ');
     if (update.toLowerCase() === 'n') {
       console.log('Cancelled.');
       rl.close();
@@ -121,11 +127,10 @@ async function main() {
     LARK_USER_REFRESH_TOKEN: hasUAT ? (existingRT || '') : '',
   };
 
-  // If we found an existing config, write to the same file (preserving project-level nesting)
-  const targetPath = found ? found.configPath : undefined;
-  const projPath = found ? found.projectPath : undefined;
-  const result = writeNewConfig(env, targetPath, projPath);
-  console.log(`Written to ${result.configPath}`);
+  // Always write to ~/.claude.json top-level mcpServers (truly global).
+  // Don't follow project-level config — that causes scope confusion.
+  const result = writeNewConfig(env);
+  console.log(`Written to ${result.configPath} (global)`);
 
   // Summary
   console.log('\n' + '='.repeat(60));
