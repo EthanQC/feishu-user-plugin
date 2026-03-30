@@ -1,22 +1,39 @@
 #!/usr/bin/env node
 /**
- * Interactive setup wizard for feishu-user-plugin
+ * Setup wizard for feishu-user-plugin
  *
- * Writes MCP config to ~/.claude.json (or .mcp.json) with credentials.
- * Does NOT require cloning the repo.
+ * Two modes:
+ *   Interactive:     npx feishu-user-plugin setup
+ *   Non-interactive: npx feishu-user-plugin setup --app-id xxx --app-secret yyy
+ *
+ * Writes MCP config to ~/.claude.json top-level mcpServers (global).
  */
 
 const readline = require('readline');
 const { findMcpConfig, writeNewConfig } = require('./config');
 
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const ask = (q) => new Promise(resolve => rl.question(q, resolve));
+// Parse CLI args: --app-id, --app-secret, --cookie
+function parseArgs() {
+  const args = {};
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--app-id' && argv[i + 1]) args.appId = argv[++i];
+    else if (argv[i] === '--app-secret' && argv[i + 1]) args.appSecret = argv[++i];
+    else if (argv[i] === '--cookie' && argv[i + 1]) args.cookie = argv[++i];
+  }
+  return args;
+}
 
 async function main() {
+  const cliArgs = parseArgs();
+  const nonInteractive = !!(cliArgs.appId && cliArgs.appSecret);
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q) => new Promise(resolve => rl.question(q, resolve));
+
   console.log('='.repeat(60));
-  console.log('  feishu-user-plugin Setup Wizard');
+  console.log('  feishu-user-plugin Setup');
   console.log('='.repeat(60));
-  console.log('');
 
   // Check existing config
   let existingEnv = {};
@@ -24,42 +41,52 @@ async function main() {
   if (found) {
     existingEnv = found.serverEnv;
     if (found.projectPath) {
-      console.log(`Found project-level config in ${found.configPath} (project: ${found.projectPath})`);
+      console.log(`\nFound project-level config in ${found.configPath} (project: ${found.projectPath})`);
       console.log('This setup will write to global config instead (recommended).');
-      console.log('You can remove the project-level entry later to avoid conflicts.\n');
+      console.log('You can remove the project-level entry later to avoid conflicts.');
     } else {
-      console.log(`Found existing config in ${found.configPath}`);
+      console.log(`\nFound existing config in ${found.configPath}`);
     }
-    const update = await ask('Update config? (Y/n): ');
-    if (update.toLowerCase() === 'n') {
-      console.log('Cancelled.');
+    if (!nonInteractive) {
+      const update = await ask('Update config? (Y/n): ');
+      if (update.toLowerCase() === 'n') {
+        console.log('Cancelled.');
+        rl.close();
+        return;
+      }
+    }
+  }
+
+  // Resolve App credentials
+  let appId, appSecret;
+
+  if (nonInteractive) {
+    // CLI args provided — no prompting
+    appId = cliArgs.appId;
+    appSecret = cliArgs.appSecret;
+    console.log(`\nApp ID: ${appId}`);
+    console.log('App Secret: ***');
+  } else {
+    // Interactive mode
+    console.log('\n--- App Credentials ---');
+    console.log('Get these from https://open.feishu.cn/app\n');
+
+    const defaultAppId = existingEnv.LARK_APP_ID || '';
+    const defaultAppSecret = existingEnv.LARK_APP_SECRET || '';
+
+    appId = (await ask(`LARK_APP_ID [${defaultAppId || 'required'}]: `)).trim() || defaultAppId;
+    if (!appId) {
+      console.error('Error: LARK_APP_ID is required.');
       rl.close();
-      return;
+      process.exit(1);
     }
-  }
 
-  // Collect credentials
-  console.log('\n--- App Credentials ---');
-  console.log('Team members: press Enter to use the shared defaults.');
-  console.log('External users: get these from https://open.feishu.cn/app\n');
-
-  const defaultAppId = existingEnv.LARK_APP_ID || '';
-  const defaultAppSecret = existingEnv.LARK_APP_SECRET || '';
-
-  let appId = await ask(`LARK_APP_ID [${defaultAppId || 'required'}]: `);
-  appId = appId.trim() || defaultAppId;
-  if (!appId) {
-    console.error('Error: LARK_APP_ID is required.');
-    rl.close();
-    process.exit(1);
-  }
-
-  let appSecret = await ask(`LARK_APP_SECRET [${defaultAppSecret ? '***' : 'required'}]: `);
-  appSecret = appSecret.trim() || defaultAppSecret;
-  if (!appSecret) {
-    console.error('Error: LARK_APP_SECRET is required.');
-    rl.close();
-    process.exit(1);
+    appSecret = (await ask(`LARK_APP_SECRET [${defaultAppSecret ? '***' : 'required'}]: `)).trim() || defaultAppSecret;
+    if (!appSecret) {
+      console.error('Error: LARK_APP_SECRET is required.');
+      rl.close();
+      process.exit(1);
+    }
   }
 
   // Validate app credentials
@@ -75,7 +102,6 @@ async function main() {
       console.log('App credentials: VALID');
     } else {
       console.error(`App credentials: INVALID — ${data.msg || JSON.stringify(data)}`);
-      console.error('Please check your LARK_APP_ID and LARK_APP_SECRET.');
       rl.close();
       process.exit(1);
     }
@@ -83,38 +109,31 @@ async function main() {
     console.warn(`Could not validate: ${e.message}. Continuing anyway.`);
   }
 
-  // Cookie
-  console.log('\n--- Cookie ---');
-  console.log('Get your cookie from feishu.cn (Network tab → first request → Cookie header).');
-  console.log('Or let Claude Code + Playwright extract it automatically after setup.\n');
-
-  const existingCookie = existingEnv.LARK_COOKIE;
-  const hasCookie = existingCookie && existingCookie !== 'PLACEHOLDER' && existingCookie.includes('session=');
-  if (hasCookie) {
-    console.log('Existing cookie found (has session token).');
-    const keepCookie = await ask('Keep existing cookie? (Y/n): ');
-    if (keepCookie.toLowerCase() === 'n') {
-      console.log('You can update it later or use Playwright extraction.');
-    }
+  // Resolve Cookie
+  let cookie;
+  if (cliArgs.cookie) {
+    cookie = cliArgs.cookie;
   } else {
-    console.log('No valid cookie found. You can add it later via:');
-    console.log('  1. Tell Claude Code: "帮我设置飞书 Cookie" (with Playwright MCP)');
-    console.log('  2. Manual: DevTools → Network → Cookie header → paste into config');
+    const existingCookie = existingEnv.LARK_COOKIE;
+    const hasCookie = existingCookie && existingCookie !== 'SETUP_NEEDED' && existingCookie.includes('session=');
+    if (hasCookie) {
+      cookie = existingCookie;
+      console.log('\nKeeping existing cookie (has session token).');
+    } else {
+      cookie = 'SETUP_NEEDED';
+      if (!nonInteractive) {
+        console.log('\n--- Cookie ---');
+        console.log('No valid cookie found. After setup:');
+        console.log('  Tell Claude Code: "帮我设置飞书 Cookie" (with Playwright MCP)');
+        console.log('  Or manually copy from DevTools → Network → Cookie header');
+      }
+    }
   }
 
-  const cookie = hasCookie ? existingCookie : 'SETUP_NEEDED';
-
-  // UAT
+  // Resolve UAT
   const existingUAT = existingEnv.LARK_USER_ACCESS_TOKEN;
   const existingRT = existingEnv.LARK_USER_REFRESH_TOKEN;
-  const hasUAT = existingUAT && existingUAT !== 'PLACEHOLDER' && existingUAT.length > 20;
-
-  if (!hasUAT) {
-    console.log('\n--- OAuth UAT ---');
-    console.log('UAT not configured. After setup, run:');
-    console.log('  npx feishu-user-plugin oauth');
-    console.log('This will open a browser for OAuth consent.');
-  }
+  const hasUAT = existingUAT && existingUAT !== 'SETUP_NEEDED' && existingUAT.length > 20;
 
   // Write config
   console.log('\n--- Writing Config ---');
@@ -127,8 +146,6 @@ async function main() {
     LARK_USER_REFRESH_TOKEN: hasUAT ? (existingRT || '') : '',
   };
 
-  // Always write to ~/.claude.json top-level mcpServers (truly global).
-  // Don't follow project-level config — that causes scope confusion.
   const result = writeNewConfig(env);
   console.log(`Written to ${result.configPath} (global)`);
 
@@ -136,14 +153,13 @@ async function main() {
   console.log('\n' + '='.repeat(60));
   console.log('  Setup Complete!');
   console.log('='.repeat(60));
-  console.log('');
 
   const todo = [];
   if (cookie === 'SETUP_NEEDED') todo.push('Get Cookie: tell Claude Code "帮我设置飞书 Cookie"');
   if (!hasUAT) todo.push('Get UAT: run "npx feishu-user-plugin oauth"');
   todo.push('Restart Claude Code');
 
-  console.log('Next steps:');
+  console.log('\nNext steps:');
   todo.forEach((t, i) => console.log(`  ${i + 1}. ${t}`));
   console.log('');
 
@@ -152,6 +168,5 @@ async function main() {
 
 main().catch(e => {
   console.error('Setup failed:', e.message);
-  rl.close();
   process.exit(1);
 });
