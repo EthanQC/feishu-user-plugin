@@ -3,17 +3,17 @@
 ## What This Is
 All-in-one Feishu plugin for Claude Code with three auth layers:
 - **User Identity** (cookie auth): Send messages (text, image, file, post, sticker, audio) as yourself
-- **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts
+- **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories
+## Tool Categories (36 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
-- `send_to_user` — Search user + send text (one step, most common)
-- `send_to_group` — Search group + send text (one step)
+- `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
+- `send_to_group` — Search group + send text (one step). Returns candidates if multiple matches.
 - `send_as_user` — Send text to any chat by ID, supports reply threading (root_id/parent_id)
-- `send_image_as_user` — Send image (requires image_key from upload)
-- `send_file_as_user` — Send file (requires file_key from upload)
+- `send_image_as_user` — Send image (requires image_key from `upload_image`)
+- `send_file_as_user` — Send file (requires file_key from `upload_file`)
 - `send_post_as_user` — Send rich text with title + formatted paragraphs
 - `send_sticker_as_user` — Send sticker/emoji
 - `send_audio_as_user` — Send audio message
@@ -22,7 +22,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `search_contacts` — Search users/groups by name
 - `create_p2p_chat` — Create/get P2P chat
 - `get_chat_info` — Group details (name, members, owner)
-- `get_user_info` — User display name lookup (with official API fallback for cross-tenant users)
+- `get_user_info` — User display name lookup (official API first, cookie cache fallback)
 - `get_login_status` — Check cookie, app, and UAT status
 
 ### User OAuth UAT Tools (P2P chat reading)
@@ -32,16 +32,19 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 ### Official API Tools (app credentials)
 - `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, oc_ ID, or numeric ID; auto-resolves via bot's group list → im.chat.search → search_contacts). **Auto-falls back to UAT for external groups the bot cannot access.** Returns newest messages first by default. Messages include sender names.
 - `reply_message` / `forward_message` — Message operations (as bot)
-- `search_docs` / `read_doc` / `create_doc` — Document operations
+- `search_docs` / `read_doc` / `get_doc_blocks` / `create_doc` — Document operations (get_doc_blocks returns structured block tree)
 - `list_bitable_tables` / `list_bitable_fields` / `search_bitable_records` — Table queries
 - `create_bitable_record` / `update_bitable_record` — Table writes
 - `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` — Wiki
 - `list_files` / `create_folder` — Drive
+- `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
 - `find_user` — Contact lookup by email/mobile
 
 ## Usage Patterns
 - Send text as yourself → `send_to_user` or `send_to_group`
-- Send rich content → `send_post_as_user` (formatted text), `send_image_as_user` (images)
+- Send image → `upload_image` → `send_image_as_user`
+- Send file → `upload_file` → `send_file_as_user`
+- Send rich content → `send_post_as_user` (formatted text with links, @mentions)
 - Read any group chat history → `read_messages` with chat name or ID (auto-handles external groups via UAT fallback)
 - Read P2P chat history → `search_contacts` → `create_p2p_chat` → `read_p2p_messages`
 - Reply as user in thread → `send_as_user` with root_id
@@ -49,10 +52,12 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - Diagnose issues → `get_login_status` first
 
 ## Auth & Session
-- **LARK_COOKIE**: Required for user identity tools. Session auto-refreshed every 4h via heartbeat.
+- **LARK_COOKIE**: Required for user identity tools. Session auto-refreshed every 4h via heartbeat and persisted to config.
 - **LARK_APP_ID + LARK_APP_SECRET**: Required for official API tools.
-- **LARK_USER_ACCESS_TOKEN + LARK_USER_REFRESH_TOKEN**: Required for P2P reading. Auto-refreshed via refresh_token. Token is auto-persisted to MCP config on refresh.
-- Cookie expiry: sl_session has 12h max-age, auto-refreshed by heartbeat.
+- **LARK_USER_ACCESS_TOKEN + LARK_USER_REFRESH_TOKEN**: Required for P2P reading. Auto-refreshed on expiry (error codes 99991668/99991663/99991677). Token auto-persisted to MCP config on refresh.
+- Cookie expiry: sl_session has 12h max-age, auto-refreshed by heartbeat every 4h.
+- UAT expiry: 2h, auto-refreshed via refresh_token.
+- Refresh token expiry: 7 days. Use `keepalive` cron to prevent expiration.
 
 ## Required Environment Variables (ALL are required for full functionality)
 
@@ -66,39 +71,38 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 
 All 5 must be configured. Without UAT, `read_p2p_messages` and `list_user_chats` will not work.
 
-## Installation — MCP Server Config Format
+## Installation
 
-### Config format for `~/.claude.json` or `.mcp.json`
+### Config location
 
-```json
-{
-  "feishu-user-plugin": {
-    "command": "npx",
-    "args": ["-y", "feishu-user-plugin"],
-    "env": {
-      "LARK_COOKIE": "<cookie-string>",
-      "LARK_APP_ID": "<app-id>",
-      "LARK_APP_SECRET": "<app-secret>",
-      "LARK_USER_ACCESS_TOKEN": "<uat>",
-      "LARK_USER_REFRESH_TOKEN": "<refresh-token>"
-    }
-  }
-}
+Credentials are stored in `~/.claude.json` top-level `mcpServers` (global — works in all directories).
+**Do NOT put credentials in project-level config** (`projects[*].mcpServers` or `.mcp.json`) — this causes scope issues.
+
+### Non-interactive setup (for Claude Code agents)
+
+```bash
+npx feishu-user-plugin setup --app-id <APP_ID> --app-secret <APP_SECRET>
 ```
 
-> `"type": "stdio"` is optional for stdio servers — Claude Code accepts it but does not require it.
+Writes config to `~/.claude.json` top-level `mcpServers` without any interactive prompts. Supports `--cookie` flag too.
 
-### Quick setup via CLI
+### Interactive setup
 
 ```bash
 npx feishu-user-plugin setup    # Interactive setup wizard
 npx feishu-user-plugin oauth    # Get OAuth UAT tokens
 npx feishu-user-plugin status   # Check auth status
+npx feishu-user-plugin keepalive # Refresh cookie + UAT (for cron jobs)
 ```
 
-### If there's an existing `.env` file
+### Token auto-renewal via cron (optional)
 
-Check the project's `.env` file for existing credentials (especially UAT tokens from previous OAuth runs). Include ALL found tokens in the config.
+To keep tokens alive even when Claude Code is closed:
+
+```bash
+crontab -e
+# Add: 0 */4 * * * npx feishu-user-plugin keepalive >> /tmp/feishu-keepalive.log 2>&1
+```
 
 ## Automated Cookie Setup via Playwright
 
@@ -162,19 +166,17 @@ Check the cookie string:
 
 If validation fails: STOP. Debug the extraction. Do NOT write a bad cookie to config.
 
-**Step 5: Write config**
+**Step 5: Write cookie to config**
 
-Use the EXACT format from the "Installation" section above. Include ALL env vars. Check `.env` for existing UAT tokens too.
+Use `persistToConfig` or directly update the `LARK_COOKIE` field in `~/.claude.json` → `mcpServers` → `feishu-user-plugin` → `env`.
 
 **Step 6: Run OAuth for UAT (if not already configured)**
-
-After writing Cookie + App credentials to config, check if LARK_USER_ACCESS_TOKEN is already available (from `.env` or previous setup). If not:
 
 ```bash
 npx feishu-user-plugin oauth
 ```
 
-This opens a browser for OAuth consent. After completion, it saves tokens to `.env`. Copy them to your MCP config's `env` section.
+This opens a browser for OAuth consent. After completion, tokens are auto-saved to `~/.claude.json`.
 
 **Step 7: Close browser and prompt restart**
 
@@ -187,7 +189,7 @@ Tell user to restart Claude Code. Only ONE restart should be needed.
 ## Troubleshooting Guide
 
 ### If MCP tools are not available
-1. Check `.mcp.json` / `~/.claude.json` config format
+1. Check `~/.claude.json` — config must be in **top-level** `mcpServers`, not inside `projects[*]`
 2. Restart Claude Code after config changes
 3. After restart, tools may take a few seconds to register — if first call fails with "No such tool", wait and retry once
 
@@ -199,37 +201,71 @@ Tell user to restart Claude Code. Only ONE restart should be needed.
 ### If Playwright logs into the wrong Feishu account
 - Playwright uses Edge's persistent profile with cached sessions
 - **ALWAYS clear cookies first** with `context.clearCookies()` before navigating to feishu.cn
-- After login, verify the account by checking the URL domain (each Feishu tenant has a unique subdomain like `xxx.feishu.cn`)
 
 ### If read_messages returns an error
-- Error messages now include the actual Feishu error code and description
+- Error messages include the actual Feishu error code and description
 - `read_messages` auto-falls back to UAT when bot API fails (e.g. external groups)
 - Chat name resolution: bot's group list → `im.chat.search` → `search_contacts` (cookie)
 - If all three strategies fail, provide the oc_xxx or numeric chat ID directly
 
-### If UAT refresh fails with "invalid_grant" (error 28003/20003/20005)
+### If UAT refresh fails with "invalid_grant"
 - The refresh token has expired or been revoked — auto-refresh cannot recover this
 - **Fix**: Re-run OAuth: `npx feishu-user-plugin oauth`
-- After OAuth completes, copy tokens from `.env` to your MCP config's `env` section
 - Then restart Claude Code
 
 ### If OAuth fails with "Missing LARK_APP_ID"
-- `oauth.js` reads credentials from the project's `.env` file
-- Run `npx feishu-user-plugin setup` first to write credentials, or create `.env` manually
-- Then re-run `npx feishu-user-plugin oauth`
+- `oauth.js` reads credentials from `~/.claude.json` MCP config (not .env)
+- Run `npx feishu-user-plugin setup` first, then re-run OAuth
 
-### If OAuth fails with error 20029 (redirect_uri invalid)
-- The Feishu app must have `http://127.0.0.1:9997/callback` registered as a redirect URI
+### If two MCP servers are running (duplicate tools)
+- This happens when both `~/.claude.json` mcpServers AND a team-skills plugin have feishu-user-plugin
+- team-skills plugin should NOT have `.mcp.json` — it only provides skills and CLAUDE.md
+- Delete `.mcp.json` from the team-skills plugin directory if it exists
 
 ### If list_user_chats doesn't return P2P chats
 - This is expected — the API only returns group chats
 - **Correct P2P flow**: `search_contacts` → `create_p2p_chat` → `read_p2p_messages`
 
-### If UAT is missing after installation
-- Run `npx feishu-user-plugin oauth` to obtain tokens
-- UAT auto-refresh now persists to `~/.claude.json` MCP config (no manual copy needed for npx users)
+## Architecture
+
+### Two distribution channels
+- **npm package** (`npx feishu-user-plugin`): MCP server code + skills + CLAUDE.md. For external users.
+- **team-skills plugin**: Skills + CLAUDE.md only (no .mcp.json). For internal team members.
+
+### Config management
+- `src/config.js`: Unified config module. Discovers config in `~/.claude.json` (top-level + project-level) and `.mcp.json`.
+- `setup` always writes to `~/.claude.json` top-level `mcpServers` (global).
+- `persistToConfig()` finds the correct config entry and writes back (used by heartbeat + UAT refresh).
+
+## Development & Publishing
+
+### Publishing to npm
+
+```bash
+# 1. Update version in package.json
+# 2. Commit and tag
+git add -A && git commit -m "v1.2.1: description"
+git tag v1.2.1
+git push && git push --tags
+# 3. GitHub Actions auto-publishes to npm on tag push
+```
+
+GitHub Actions workflow (`.github/workflows/publish.yml`) auto-publishes on `v*` tags.
+NPM_TOKEN is stored as a GitHub repo secret.
+
+### Syncing to team-skills
+
+After publishing, sync plugin assets to team-skills:
+
+```bash
+# From the feishu-user-plugin repo:
+cp -r skills/ /path/to/team-skills/plugins/feishu-user-plugin/skills/
+cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.claude-plugin/
+# Do NOT copy .mcp.json — team-skills plugin should not have one
+```
 
 ## Known Limitations
-- Image/file upload must go through Official API or feishu-file-bridge first to obtain keys
 - CARD message type (type=14) not yet implemented — complex JSON schema
 - External tenant users may not be resolvable via `get_user_info` (contact API scope limitation)
+- Cookie auth requires human interaction (QR scan) — cannot be fully automated
+- Refresh token expires after 7 days without use — set up `keepalive` cron to prevent this
