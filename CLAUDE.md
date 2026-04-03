@@ -46,14 +46,28 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `find_user` — Contact lookup by email/mobile
 
 ## Usage Patterns
+
+### Messaging
 - Send text as yourself → `send_to_user` or `send_to_group`
 - Send image → `upload_image` → `send_image_as_user`
 - Send file → `upload_file` → `send_file_as_user`
 - Send rich content → `send_post_as_user` (formatted text with links, @mentions)
-- Read any group chat history → `read_messages` with chat name or ID (auto-handles external groups via UAT fallback)
-- Read P2P chat history → `search_contacts` → `create_p2p_chat` → `read_p2p_messages`
 - Reply as user in thread → `send_as_user` with root_id
 - Reply as bot → `reply_message` (official API)
+
+### Reading
+- Read any group chat history → `read_messages` with chat name or ID (auto-handles external groups via UAT fallback)
+- Read P2P chat history → `search_contacts` → `create_p2p_chat` → `read_p2p_messages`
+- Get chat details → `get_chat_info` (supports both oc_xxx and numeric ID)
+
+### Bitable (Multi-dimensional Tables)
+- Create a bitable from scratch → `create_bitable` → `create_bitable_table` → `create_bitable_field`
+- Query data → `list_bitable_tables` → `list_bitable_fields` → `search_bitable_records`
+- Single record CRUD → `create_bitable_record` / `update_bitable_record` / `delete_bitable_record`
+- Bulk operations → `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` (max 500/call)
+- Manage fields → `create_bitable_field` / `update_bitable_field` (requires type param) / `delete_bitable_field`
+
+### Diagnostics
 - Diagnose issues → `get_login_status` first
 
 ## Auth & Session
@@ -274,3 +288,6 @@ cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.c
 - External tenant users may not be resolvable via `get_user_info` (contact API scope limitation)
 - Cookie auth requires human interaction (QR scan) — cannot be fully automated
 - Refresh token expires after 7 days without use — set up `keepalive` cron to prevent this
+- `update_bitable_field` requires `type` parameter even when only changing field name (Feishu API requirement)
+- `list_wiki_spaces` may return empty if bot lacks `wiki:wiki:readonly` permission
+- `search_wiki` uses same API as `search_docs` — `docs_types` filter may not work as expected
