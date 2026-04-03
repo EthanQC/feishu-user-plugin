@@ -710,6 +710,384 @@ const TOOLS = [
       },
     },
   },
+
+  // ========== IM — Bot Send / Edit / Delete ==========
+  {
+    name: 'send_message_as_bot',
+    description: '[Official API] Send a message as the bot to any chat. Supports text, post, interactive, etc.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat_id (oc_xxx) or open_id' },
+        msg_type: { type: 'string', description: 'Message type: text, post, image, interactive, etc.', enum: ['text', 'post', 'image', 'interactive', 'share_chat', 'share_user', 'audio', 'media', 'file', 'sticker'] },
+        content: { description: 'Message content (string or object, auto-serialized). For text: {"text":"hello"}' },
+      },
+      required: ['chat_id', 'msg_type', 'content'],
+    },
+  },
+  {
+    name: 'delete_message',
+    description: '[Official API] Recall/delete a message (bot can only delete its own messages).',
+    inputSchema: {
+      type: 'object',
+      properties: { message_id: { type: 'string', description: 'Message ID (om_xxx)' } },
+      required: ['message_id'],
+    },
+  },
+  {
+    name: 'update_message',
+    description: '[Official API] Edit a sent message (bot can only edit its own messages). Supports text and post.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'Message ID (om_xxx)' },
+        msg_type: { type: 'string', description: 'Message type: text or post' },
+        content: { description: 'New content. For text: {"text":"updated text"}' },
+      },
+      required: ['message_id', 'msg_type', 'content'],
+    },
+  },
+
+  // ========== IM — Reactions ==========
+  {
+    name: 'add_reaction',
+    description: '[Official API] Add an emoji reaction to a message.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'Message ID (om_xxx)' },
+        emoji_type: { type: 'string', description: 'Emoji type string, e.g. "THUMBSUP", "SMILE", "HEART"' },
+      },
+      required: ['message_id', 'emoji_type'],
+    },
+  },
+  {
+    name: 'delete_reaction',
+    description: '[Official API] Remove an emoji reaction from a message.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'Message ID' },
+        reaction_id: { type: 'string', description: 'Reaction ID (from add_reaction response)' },
+      },
+      required: ['message_id', 'reaction_id'],
+    },
+  },
+
+  // ========== IM — Pin Messages ==========
+  {
+    name: 'pin_message',
+    description: '[Official API] Pin a message in a chat.',
+    inputSchema: {
+      type: 'object',
+      properties: { message_id: { type: 'string', description: 'Message ID to pin' } },
+      required: ['message_id'],
+    },
+  },
+  {
+    name: 'unpin_message',
+    description: '[Official API] Unpin a message from a chat.',
+    inputSchema: {
+      type: 'object',
+      properties: { message_id: { type: 'string', description: 'Message ID to unpin' } },
+      required: ['message_id'],
+    },
+  },
+
+  // ========== IM — Chat Management ==========
+  {
+    name: 'create_group',
+    description: '[Official API] Create a new group chat (as bot). Can add initial members.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Group name' },
+        description: { type: 'string', description: 'Group description (optional)' },
+        user_ids: { type: 'array', items: { type: 'string' }, description: 'Initial member open_ids (optional)' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'update_group',
+    description: '[Official API] Update group chat name or description.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Chat ID (oc_xxx)' },
+        name: { type: 'string', description: 'New group name (optional)' },
+        description: { type: 'string', description: 'New description (optional)' },
+      },
+      required: ['chat_id'],
+    },
+  },
+  {
+    name: 'list_members',
+    description: '[Official API] List all members in a group chat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Chat ID (oc_xxx)' },
+        page_size: { type: 'number', description: 'Items per page (default 50)' },
+        page_token: { type: 'string', description: 'Pagination token' },
+      },
+      required: ['chat_id'],
+    },
+  },
+  {
+    name: 'add_members',
+    description: '[Official API] Add users to a group chat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Chat ID (oc_xxx)' },
+        user_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids to add' },
+      },
+      required: ['chat_id', 'user_ids'],
+    },
+  },
+  {
+    name: 'remove_members',
+    description: '[Official API] Remove users from a group chat.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Chat ID (oc_xxx)' },
+        user_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids to remove' },
+      },
+      required: ['chat_id', 'user_ids'],
+    },
+  },
+
+  // ========== Docs — Block Editing ==========
+  {
+    name: 'create_doc_block',
+    description: '[Official API] Insert content blocks into a document. Add text, headings, lists, etc. after create_doc.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'Document ID' },
+        parent_block_id: { type: 'string', description: 'Parent block ID (use document_id for root)' },
+        children: { type: 'array', description: 'Array of block objects to insert. E.g. [{block_type:2, text:{elements:[{text_run:{content:"Hello"}}]}}]', items: { type: 'object' } },
+        index: { type: 'number', description: 'Insert position (optional, appends to end if omitted)' },
+      },
+      required: ['document_id', 'parent_block_id', 'children'],
+    },
+  },
+  {
+    name: 'update_doc_block',
+    description: '[Official API] Update a specific block in a document (change text content, style, etc.).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'Document ID' },
+        block_id: { type: 'string', description: 'Block ID to update' },
+        update_body: { type: 'object', description: 'Update payload. E.g. {update_text_elements:{elements:[{text_run:{content:"new text"}}]}}' },
+      },
+      required: ['document_id', 'block_id', 'update_body'],
+    },
+  },
+  {
+    name: 'delete_doc_blocks',
+    description: '[Official API] Delete a range of blocks from a document.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        document_id: { type: 'string', description: 'Document ID' },
+        parent_block_id: { type: 'string', description: 'Parent block ID containing the blocks to delete' },
+        start_index: { type: 'number', description: 'Start index (inclusive)' },
+        end_index: { type: 'number', description: 'End index (exclusive)' },
+      },
+      required: ['document_id', 'parent_block_id', 'start_index', 'end_index'],
+    },
+  },
+
+  // ========== Bitable — Additional ==========
+  {
+    name: 'get_bitable_record',
+    description: '[Official API] Get a single record by ID from a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        record_id: { type: 'string', description: 'Record ID' },
+      },
+      required: ['app_token', 'table_id', 'record_id'],
+    },
+  },
+  {
+    name: 'delete_bitable_table',
+    description: '[Official API] Delete a data table from a Bitable app.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID to delete' },
+      },
+      required: ['app_token', 'table_id'],
+    },
+  },
+
+  // ========== Drive — File Operations ==========
+  {
+    name: 'copy_file',
+    description: '[Official API] Copy a file/doc in Drive.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_token: { type: 'string', description: 'File token to copy' },
+        name: { type: 'string', description: 'New file name' },
+        folder_token: { type: 'string', description: 'Destination folder token (optional)' },
+        type: { type: 'string', description: 'File type: file, doc, sheet, bitable, docx, mindnote, slides (optional)' },
+      },
+      required: ['file_token', 'name'],
+    },
+  },
+  {
+    name: 'move_file',
+    description: '[Official API] Move a file to another folder in Drive.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_token: { type: 'string', description: 'File token to move' },
+        folder_token: { type: 'string', description: 'Destination folder token' },
+      },
+      required: ['file_token', 'folder_token'],
+    },
+  },
+  {
+    name: 'delete_file',
+    description: '[Official API] Delete a file/folder from Drive.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_token: { type: 'string', description: 'File token to delete' },
+        type: { type: 'string', description: 'Type: file, folder, doc, sheet, bitable, docx, mindnote, slides' },
+      },
+      required: ['file_token'],
+    },
+  },
+
+  // ========== Calendar ==========
+  {
+    name: 'list_calendars',
+    description: '[Official API] List all calendars accessible by the bot.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'create_calendar_event',
+    description: '[Official API] Create a calendar event.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendar_id: { type: 'string', description: 'Calendar ID (from list_calendars)' },
+        summary: { type: 'string', description: 'Event title' },
+        start_time: { type: 'string', description: 'Start time (RFC3339 or Unix timestamp string)' },
+        end_time: { type: 'string', description: 'End time (RFC3339 or Unix timestamp string)' },
+        description: { type: 'string', description: 'Event description (optional)' },
+        location: { type: 'string', description: 'Event location (optional)' },
+      },
+      required: ['calendar_id', 'summary', 'start_time', 'end_time'],
+    },
+  },
+  {
+    name: 'list_calendar_events',
+    description: '[Official API] List events in a calendar.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendar_id: { type: 'string', description: 'Calendar ID' },
+        start_time: { type: 'string', description: 'Start time filter (Unix timestamp string, optional)' },
+        end_time: { type: 'string', description: 'End time filter (Unix timestamp string, optional)' },
+        page_size: { type: 'number', description: 'Items per page (default 50)' },
+      },
+      required: ['calendar_id'],
+    },
+  },
+  {
+    name: 'delete_calendar_event',
+    description: '[Official API] Delete a calendar event.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendar_id: { type: 'string', description: 'Calendar ID' },
+        event_id: { type: 'string', description: 'Event ID to delete' },
+      },
+      required: ['calendar_id', 'event_id'],
+    },
+  },
+  {
+    name: 'get_freebusy',
+    description: '[Official API] Check free/busy status of users for a time range.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids to check' },
+        start_time: { type: 'string', description: 'Range start (RFC3339)' },
+        end_time: { type: 'string', description: 'Range end (RFC3339)' },
+      },
+      required: ['user_ids', 'start_time', 'end_time'],
+    },
+  },
+
+  // ========== Tasks ==========
+  {
+    name: 'create_task',
+    description: '[Official API] Create a new task in Feishu Tasks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'Task title/summary' },
+        description: { type: 'string', description: 'Task description (optional)' },
+        due: { type: 'string', description: 'Due date/time (RFC3339 or Unix timestamp string, optional)' },
+      },
+      required: ['summary'],
+    },
+  },
+  {
+    name: 'get_task',
+    description: '[Official API] Get task details by ID.',
+    inputSchema: {
+      type: 'object',
+      properties: { task_id: { type: 'string', description: 'Task ID' } },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'list_tasks',
+    description: '[Official API] List tasks.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_size: { type: 'number', description: 'Items per page (default 50)' },
+        page_token: { type: 'string', description: 'Pagination token' },
+      },
+    },
+  },
+  {
+    name: 'update_task',
+    description: '[Official API] Update a task (title, description, due date, etc.).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID' },
+        summary: { type: 'string', description: 'New title (optional)' },
+        description: { type: 'string', description: 'New description (optional)' },
+        due: { type: 'string', description: 'New due date (optional)' },
+      },
+      required: ['task_id'],
+    },
+  },
+  {
+    name: 'complete_task',
+    description: '[Official API] Mark a task as complete.',
+    inputSchema: {
+      type: 'object',
+      properties: { task_id: { type: 'string', description: 'Task ID to complete' } },
+      required: ['task_id'],
+    },
+  },
 ];
 
 // --- Server ---
@@ -1034,6 +1412,115 @@ async function handleTool(name, args) {
       const r = await getOfficialClient().uploadFile(args.file_path, args.file_type, args.file_name);
       return text(`File uploaded: ${r.fileKey}\nUse this file_key with send_file_as_user to send it.`);
     }
+
+    // --- Official API: Bot Send / Edit / Delete ---
+
+    case 'send_message_as_bot': {
+      const r = await getOfficialClient().sendMessageAsBot(args.chat_id, args.msg_type, args.content);
+      return text(`Message sent (bot): ${r.messageId}`);
+    }
+    case 'delete_message':
+      return text(`Message deleted: ${(await getOfficialClient().deleteMessage(args.message_id)).deleted}`);
+    case 'update_message':
+      return text(`Message updated: ${(await getOfficialClient().updateMessage(args.message_id, args.msg_type, args.content)).messageId}`);
+
+    // --- Official API: Reactions ---
+
+    case 'add_reaction':
+      return text(`Reaction added: ${(await getOfficialClient().addReaction(args.message_id, args.emoji_type)).reactionId}`);
+    case 'delete_reaction':
+      return text(`Reaction removed: ${(await getOfficialClient().deleteReaction(args.message_id, args.reaction_id)).deleted}`);
+
+    // --- Official API: Pins ---
+
+    case 'pin_message':
+      return json(await getOfficialClient().pinMessage(args.message_id));
+    case 'unpin_message':
+      return text(`Unpinned: ${(await getOfficialClient().unpinMessage(args.message_id)).deleted}`);
+
+    // --- Official API: Chat Management ---
+
+    case 'create_group':
+      return text(`Group created: ${(await getOfficialClient().createChat({ name: args.name, description: args.description, userIds: args.user_ids })).chatId}`);
+    case 'update_group':
+      return text(`Group updated: ${(await getOfficialClient().updateChat(args.chat_id, { name: args.name, description: args.description })).updated}`);
+    case 'list_members':
+      return json(await getOfficialClient().listChatMembers(args.chat_id, { pageSize: args.page_size, pageToken: args.page_token }));
+    case 'add_members': {
+      const r = await getOfficialClient().addChatMembers(args.chat_id, args.user_ids);
+      return text(r.invalidIds.length ? `Added (invalid IDs: ${r.invalidIds.join(', ')})` : 'Members added');
+    }
+    case 'remove_members': {
+      const r = await getOfficialClient().removeChatMembers(args.chat_id, args.user_ids);
+      return text(r.invalidIds.length ? `Removed (invalid IDs: ${r.invalidIds.join(', ')})` : 'Members removed');
+    }
+
+    // --- Official API: Doc Block Editing ---
+
+    case 'create_doc_block':
+      return json(await getOfficialClient().createDocBlock(args.document_id, args.parent_block_id, args.children, args.index));
+    case 'update_doc_block':
+      return json(await getOfficialClient().updateDocBlock(args.document_id, args.block_id, args.update_body));
+    case 'delete_doc_blocks':
+      return text(`Blocks deleted: ${(await getOfficialClient().deleteDocBlocks(args.document_id, args.parent_block_id, args.start_index, args.end_index)).deleted}`);
+
+    // --- Official API: Bitable Additional ---
+
+    case 'get_bitable_record':
+      return json(await getOfficialClient().getBitableRecord(args.app_token, args.table_id, args.record_id));
+    case 'delete_bitable_table':
+      return text(`Table deleted: ${(await getOfficialClient().deleteBitableTable(args.app_token, args.table_id)).deleted}`);
+
+    // --- Official API: Drive File Operations ---
+
+    case 'copy_file':
+      return json(await getOfficialClient().copyFile(args.file_token, args.name, args.folder_token, args.type));
+    case 'move_file':
+      return text(`File moved: task=${(await getOfficialClient().moveFile(args.file_token, args.folder_token)).taskId}`);
+    case 'delete_file':
+      return text(`File deleted: task=${(await getOfficialClient().deleteFile(args.file_token, args.type)).taskId}`);
+
+    // --- Official API: Calendar ---
+
+    case 'list_calendars':
+      return json(await getOfficialClient().listCalendars());
+    case 'create_calendar_event': {
+      const event = { summary: args.summary, description: args.description || '' };
+      event.start_time = { timestamp: args.start_time };
+      event.end_time = { timestamp: args.end_time };
+      if (args.location) event.location = { name: args.location };
+      return json(await getOfficialClient().createCalendarEvent(args.calendar_id, event));
+    }
+    case 'list_calendar_events':
+      return json(await getOfficialClient().listCalendarEvents(args.calendar_id, {
+        startTime: args.start_time, endTime: args.end_time, pageSize: args.page_size,
+      }));
+    case 'delete_calendar_event':
+      return text(`Event deleted: ${(await getOfficialClient().deleteCalendarEvent(args.calendar_id, args.event_id)).deleted}`);
+    case 'get_freebusy':
+      return json(await getOfficialClient().getFreeBusy(args.user_ids, args.start_time, args.end_time));
+
+    // --- Official API: Tasks ---
+
+    case 'create_task': {
+      const task = { summary: args.summary };
+      if (args.description) task.description = args.description;
+      if (args.due) task.due = { timestamp: args.due };
+      return json(await getOfficialClient().createTask(task));
+    }
+    case 'get_task':
+      return json(await getOfficialClient().getTask(args.task_id));
+    case 'list_tasks':
+      return json(await getOfficialClient().listTasks({ pageSize: args.page_size, pageToken: args.page_token }));
+    case 'update_task': {
+      const task = {};
+      if (args.summary) task.summary = args.summary;
+      if (args.description) task.description = args.description;
+      if (args.due) task.due = { timestamp: args.due };
+      return json(await getOfficialClient().updateTask(args.task_id, task));
+    }
+    case 'complete_task':
+      return text(`Task completed: ${(await getOfficialClient().completeTask(args.task_id)).completed}`);
 
     default:
       return text(`Unknown tool: ${name}`);

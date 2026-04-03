@@ -28,7 +28,19 @@
 - [x] batch_create/update/delete_bitable_records — 批量操作（max 500）
 - [x] list_bitable_views — 视图列表
 
-## v1.3 — 计划中
+### v1.3.0 — SDK 全功能覆盖 (30 new tools, 46→76)
+- [x] Bot 主动发消息 (`send_message_as_bot`)
+- [x] 消息撤回/编辑 (`delete_message`, `update_message`)
+- [x] 表情回复 (`add_reaction`, `delete_reaction`)
+- [x] 消息置顶 (`pin_message`, `unpin_message`)
+- [x] 群组管理 (`create_group`, `update_group`, `list_members`, `add_members`, `remove_members`)
+- [x] 文档内容编辑 (`create_doc_block`, `update_doc_block`, `delete_doc_blocks`)
+- [x] Bitable 补全 (`get_bitable_record`, `delete_bitable_table`)
+- [x] 云盘文件操作 (`copy_file`, `move_file`, `delete_file`)
+- [x] 日历管理 (`list_calendars`, `create_calendar_event`, `list_calendar_events`, `delete_calendar_event`, `get_freebusy`)
+- [x] 任务管理 (`create_task`, `get_task`, `list_tasks`, `update_task`, `complete_task`)
+
+## v1.4 — 计划中
 
 ### WebSocket 实时事件（核心方向）
 

@@ -6,7 +6,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories (46 tools)
+## Tool Categories (76 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
 - `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
@@ -31,8 +31,15 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 
 ### Official API Tools (app credentials)
 - `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, oc_ ID, or numeric ID; auto-resolves via bot's group list → im.chat.search → search_contacts). **Auto-falls back to UAT for external groups the bot cannot access.** Returns newest messages first by default. Messages include sender names.
+- `send_message_as_bot` — Bot sends message to any chat (text, post, interactive, etc.)
 - `reply_message` / `forward_message` — Message operations (as bot)
-- `search_docs` / `read_doc` / `get_doc_blocks` / `create_doc` — Document operations (get_doc_blocks returns structured block tree)
+- `delete_message` / `update_message` — Recall or edit bot's own messages
+- `add_reaction` / `delete_reaction` — Emoji reactions on messages
+- `pin_message` / `unpin_message` — Pin/unpin messages in chat
+- `create_group` / `update_group` — Create and manage group chats
+- `list_members` / `add_members` / `remove_members` — Group membership management
+- `search_docs` / `read_doc` / `get_doc_blocks` / `create_doc` — Document operations
+- `create_doc_block` / `update_doc_block` / `delete_doc_blocks` — Document content editing (insert/update/delete blocks)
 - `create_bitable` — Create a new Bitable (multi-dimensional table) app
 - `list_bitable_tables` / `create_bitable_table` — Table management
 - `list_bitable_fields` / `create_bitable_field` / `update_bitable_field` / `delete_bitable_field` — Field (column) management
@@ -42,8 +49,12 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` — Batch operations (max 500/call)
 - `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` — Wiki
 - `list_files` / `create_folder` — Drive
+- `copy_file` / `move_file` / `delete_file` — Drive file operations (copy, move, delete)
 - `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
 - `find_user` — Contact lookup by email/mobile
+- `list_calendars` / `create_calendar_event` / `list_calendar_events` / `delete_calendar_event` — Calendar management
+- `get_freebusy` — Check user availability
+- `create_task` / `get_task` / `list_tasks` / `update_task` / `complete_task` — Task management
 
 ## Usage Patterns
 
@@ -66,6 +77,25 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - Single record CRUD → `create_bitable_record` / `update_bitable_record` / `delete_bitable_record`
 - Bulk operations → `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` (max 500/call)
 - Manage fields → `create_bitable_field` / `update_bitable_field` (requires type param) / `delete_bitable_field`
+
+### Group Management
+- Create a group → `create_group` with name and optional member open_ids
+- Add/remove members → `add_members` / `remove_members` with chat_id + user open_ids
+- List members → `list_members`
+
+### Document Editing
+- Create doc with content → `create_doc` → `create_doc_block` (use document_id as parent_block_id for root)
+- Edit existing block → `get_doc_blocks` to find block_id → `update_doc_block`
+- Delete blocks → `delete_doc_blocks` with start/end index range
+
+### Calendar
+- View schedule → `list_calendars` → `list_calendar_events`
+- Create event → `create_calendar_event` with calendar_id, summary, start/end time
+- Check availability → `get_freebusy` with user open_ids and time range
+
+### Tasks
+- Create task → `create_task` with summary, optional description/due
+- Track tasks → `list_tasks` → `update_task` / `complete_task`
 
 ### Diagnostics
 - Diagnose issues → `get_login_status` first

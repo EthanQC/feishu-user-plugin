@@ -177,6 +177,140 @@ class LarkOfficialClient {
     return { messageId: res.data.message_id };
   }
 
+  // --- IM: Send (Bot Identity) ---
+
+  async sendMessageAsBot(chatId, msgType, content, receiveIdType = 'chat_id') {
+    const res = await this._safeSDKCall(
+      () => this.client.im.message.create({
+        params: { receive_id_type: receiveIdType },
+        data: { receive_id: chatId, msg_type: msgType, content: typeof content === 'string' ? content : JSON.stringify(content) },
+      }),
+      'sendMessage'
+    );
+    return { messageId: res.data.message_id };
+  }
+
+  async deleteMessage(messageId) {
+    await this._safeSDKCall(
+      () => this.client.im.message.delete({ path: { message_id: messageId } }),
+      'deleteMessage'
+    );
+    return { deleted: true };
+  }
+
+  async updateMessage(messageId, msgType, content) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.message.patch({
+        path: { message_id: messageId },
+        data: { msg_type: msgType, content: typeof content === 'string' ? content : JSON.stringify(content) },
+      }),
+      'updateMessage'
+    );
+    return { messageId: res.data?.message_id || messageId };
+  }
+
+  // --- IM: Reactions ---
+
+  async addReaction(messageId, emojiType) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.messageReaction.create({
+        path: { message_id: messageId },
+        data: { reaction_type: { emoji_type: emojiType } },
+      }),
+      'addReaction'
+    );
+    return { reactionId: res.data.reaction_id };
+  }
+
+  async deleteReaction(messageId, reactionId) {
+    await this._safeSDKCall(
+      () => this.client.im.messageReaction.delete({
+        path: { message_id: messageId, reaction_id: reactionId },
+      }),
+      'deleteReaction'
+    );
+    return { deleted: true };
+  }
+
+  // --- IM: Pins ---
+
+  async pinMessage(messageId) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.pin.create({ data: { message_id: messageId } }),
+      'pinMessage'
+    );
+    return { pin: res.data.pin };
+  }
+
+  async unpinMessage(messageId) {
+    await this._safeSDKCall(
+      () => this.client.im.pin.delete({ data: { message_id: messageId } }),
+      'unpinMessage'
+    );
+    return { deleted: true };
+  }
+
+  // --- IM: Chat Management ---
+
+  async createChat({ name, description, userIds, botIds } = {}) {
+    const data = {};
+    if (name) data.name = name;
+    if (description) data.description = description;
+    if (userIds) data.user_id_list = userIds;
+    if (botIds) data.bot_id_list = botIds;
+    const res = await this._safeSDKCall(
+      () => this.client.im.chat.create({ params: { user_id_type: 'open_id' }, data }),
+      'createChat'
+    );
+    return { chatId: res.data.chat_id };
+  }
+
+  async updateChat(chatId, { name, description } = {}) {
+    const data = {};
+    if (name) data.name = name;
+    if (description) data.description = description;
+    const res = await this._safeSDKCall(
+      () => this.client.im.chat.update({ path: { chat_id: chatId }, data }),
+      'updateChat'
+    );
+    return { updated: true };
+  }
+
+  async listChatMembers(chatId, { pageSize = 50, pageToken } = {}) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.chatMembers.get({
+        path: { chat_id: chatId },
+        params: { member_id_type: 'open_id', page_size: pageSize, page_token: pageToken },
+      }),
+      'listChatMembers'
+    );
+    return { items: res.data.items || [], hasMore: res.data.has_more, pageToken: res.data.page_token };
+  }
+
+  async addChatMembers(chatId, userIds) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.chatMembers.create({
+        path: { chat_id: chatId },
+        params: { member_id_type: 'open_id' },
+        data: { id_list: userIds },
+      }),
+      'addChatMembers'
+    );
+    return { invalidIds: res.data.invalid_id_list || [] };
+  }
+
+  async removeChatMembers(chatId, userIds) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.chatMembers.delete({
+        path: { chat_id: chatId },
+        params: { member_id_type: 'open_id' },
+        data: { id_list: userIds },
+      }),
+      'removeChatMembers'
+    );
+    return { invalidIds: res.data.invalid_id_list || [] };
+  }
+
   // --- Upload ---
 
   async uploadImage(imagePath, imageType = 'message') {
@@ -248,6 +382,41 @@ class LarkOfficialClient {
       'getDocBlocks'
     );
     return { items: res.data.items || [] };
+  }
+
+  async createDocBlock(documentId, parentBlockId, children, index) {
+    const data = { children };
+    if (index !== undefined) data.index = index;
+    const res = await this._safeSDKCall(
+      () => this.client.docx.documentBlockChildren.create({
+        path: { document_id: documentId, block_id: parentBlockId },
+        data,
+      }),
+      'createDocBlock'
+    );
+    return { blocks: res.data.children || [] };
+  }
+
+  async updateDocBlock(documentId, blockId, updateBody) {
+    const res = await this._safeSDKCall(
+      () => this.client.docx.documentBlock.patch({
+        path: { document_id: documentId, block_id: blockId },
+        data: updateBody,
+      }),
+      'updateDocBlock'
+    );
+    return { block: res.data.block };
+  }
+
+  async deleteDocBlocks(documentId, parentBlockId, startIndex, endIndex) {
+    const res = await this._safeSDKCall(
+      () => this.client.docx.documentBlockChildren.batchDelete({
+        path: { document_id: documentId, block_id: parentBlockId },
+        data: { start_index: startIndex, end_index: endIndex },
+      }),
+      'deleteDocBlocks'
+    );
+    return { deleted: true };
   }
 
   // --- Chat Info (Official API) ---
@@ -387,6 +556,22 @@ class LarkOfficialClient {
     return { items: res.data.items || [] };
   }
 
+  async getBitableRecord(appToken, tableId, recordId) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableRecord.get({ path: { app_token: appToken, table_id: tableId, record_id: recordId } }),
+      'getRecord'
+    );
+    return { record: res.data.record };
+  }
+
+  async deleteBitableTable(appToken, tableId) {
+    await this._safeSDKCall(
+      () => this.client.bitable.appTable.delete({ path: { app_token: appToken, table_id: tableId } }),
+      'deleteTable'
+    );
+    return { deleted: true };
+  }
+
   // --- Wiki ---
 
   async listWikiSpaces() {
@@ -435,6 +620,34 @@ class LarkOfficialClient {
     return { token: res.data.token };
   }
 
+  // --- Drive: File Operations ---
+
+  async copyFile(fileToken, name, folderToken, type) {
+    const data = { name, folder_token: folderToken || '' };
+    if (type) data.type = type;
+    const res = await this._safeSDKCall(
+      () => this.client.drive.file.copy({ path: { file_token: fileToken }, data }),
+      'copyFile'
+    );
+    return { file: res.data.file };
+  }
+
+  async moveFile(fileToken, folderToken) {
+    const res = await this._safeSDKCall(
+      () => this.client.drive.file.move({ path: { file_token: fileToken }, data: { folder_token: folderToken || '' } }),
+      'moveFile'
+    );
+    return { taskId: res.data.task_id };
+  }
+
+  async deleteFile(fileToken, type) {
+    const res = await this._safeSDKCall(
+      () => this.client.drive.file.delete({ path: { file_token: fileToken }, params: { type: type || 'file' } }),
+      'deleteFile'
+    );
+    return { taskId: res.data.task_id };
+  }
+
   // --- Contact ---
 
   async findUserByIdentity({ emails, mobiles } = {}) {
@@ -464,6 +677,111 @@ class LarkOfficialClient {
       hasMore = res.data.has_more && !!pageToken;
     }
     return allChats;
+  }
+
+  // --- Calendar ---
+
+  async listCalendars() {
+    const res = await this._safeSDKCall(
+      () => this.client.calendar.calendar.list({ params: { page_size: 50 } }),
+      'listCalendars'
+    );
+    return { items: res.data.calendar_list || [] };
+  }
+
+  async createCalendarEvent(calendarId, event) {
+    const res = await this._safeSDKCall(
+      () => this.client.calendar.calendarEvent.create({
+        path: { calendar_id: calendarId },
+        data: event,
+      }),
+      'createCalendarEvent'
+    );
+    return { event: res.data.event };
+  }
+
+  async listCalendarEvents(calendarId, { startTime, endTime, pageSize = 50, pageToken } = {}) {
+    const params = { page_size: pageSize };
+    if (startTime) params.start_time = startTime;
+    if (endTime) params.end_time = endTime;
+    if (pageToken) params.page_token = pageToken;
+    const res = await this._safeSDKCall(
+      () => this.client.calendar.calendarEvent.list({
+        path: { calendar_id: calendarId },
+        params,
+      }),
+      'listCalendarEvents'
+    );
+    return { items: res.data.items || [], hasMore: res.data.has_more, pageToken: res.data.page_token };
+  }
+
+  async deleteCalendarEvent(calendarId, eventId) {
+    await this._safeSDKCall(
+      () => this.client.calendar.calendarEvent.delete({
+        path: { calendar_id: calendarId, event_id: eventId },
+      }),
+      'deleteCalendarEvent'
+    );
+    return { deleted: true };
+  }
+
+  async getFreeBusy(userIds, startTime, endTime) {
+    const res = await this._safeSDKCall(
+      () => this.client.calendar.freebusy.list({
+        data: {
+          time_min: startTime,
+          time_max: endTime,
+          user_id: { user_ids: userIds, id_type: 'open_id' },
+        },
+      }),
+      'getFreeBusy'
+    );
+    return { freebusyList: res.data.freebusy_list || [] };
+  }
+
+  // --- Tasks ---
+
+  async createTask(task) {
+    const res = await this._safeSDKCall(
+      () => this.client.task.task.create({ data: task }),
+      'createTask'
+    );
+    return { task: res.data.task };
+  }
+
+  async getTask(taskId) {
+    const res = await this._safeSDKCall(
+      () => this.client.task.task.get({ path: { task_id: taskId } }),
+      'getTask'
+    );
+    return { task: res.data.task };
+  }
+
+  async listTasks({ pageSize = 50, pageToken } = {}) {
+    const res = await this._safeSDKCall(
+      () => this.client.task.task.list({ params: { page_size: pageSize, page_token: pageToken } }),
+      'listTasks'
+    );
+    return { items: res.data.items || [], hasMore: res.data.has_more, pageToken: res.data.page_token };
+  }
+
+  async updateTask(taskId, task) {
+    const res = await this._safeSDKCall(
+      () => this.client.task.task.patch({
+        path: { task_id: taskId },
+        data: task,
+      }),
+      'updateTask'
+    );
+    return { task: res.data.task };
+  }
+
+  async completeTask(taskId) {
+    const res = await this._safeSDKCall(
+      () => this.client.task.task.complete({ path: { task_id: taskId } }),
+      'completeTask'
+    );
+    return { completed: true };
   }
 
   // --- Safe SDK Call (extracts real Feishu error from AxiosError) ---
