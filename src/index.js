@@ -272,10 +272,10 @@ const TOOLS = [
   },
   {
     name: 'get_chat_info',
-    description: '[User Identity] Get chat details: name, description, member count, owner.',
+    description: '[Official API + User Identity fallback] Get chat details: name, description, member count, owner. Supports both oc_xxx and numeric chat_id.',
     inputSchema: {
       type: 'object',
-      properties: { chat_id: { type: 'string', description: 'Chat ID' } },
+      properties: { chat_id: { type: 'string', description: 'Chat ID (oc_xxx or numeric)' } },
       required: ['chat_id'],
     },
   },
@@ -422,6 +422,17 @@ const TOOLS = [
 
   // ========== Bitable — Official API ==========
   {
+    name: 'create_bitable',
+    description: '[Official API] Create a new Bitable (multi-dimensional table) app.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Bitable app name' },
+        folder_id: { type: 'string', description: 'Parent folder token (optional, defaults to root)' },
+      },
+    },
+  },
+  {
     name: 'list_bitable_tables',
     description: '[Official API] List all tables in a Bitable app.',
     inputSchema: {
@@ -431,8 +442,81 @@ const TOOLS = [
     },
   },
   {
+    name: 'create_bitable_table',
+    description: '[Official API] Create a new data table in a Bitable app. Optionally define initial fields.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        name: { type: 'string', description: 'Table name' },
+        fields: {
+          type: 'array',
+          description: 'Initial field definitions (optional). Each item: {field_name, type} where type is 1=Text, 2=Number, 3=SingleSelect, 4=MultiSelect, 5=DateTime, 7=Checkbox, 11=User, 13=Phone, 15=URL, 17=Attachment, 18=Link, 20=Formula, 21=DuplexLink, 22=Location, 23=GroupChat, 1001=CreateTime, 1002=ModifiedTime, 1003=Creator, 1004=Modifier',
+          items: { type: 'object' },
+        },
+      },
+      required: ['app_token', 'name'],
+    },
+  },
+  {
     name: 'list_bitable_fields',
     description: '[Official API] List all fields (columns) in a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+      },
+      required: ['app_token', 'table_id'],
+    },
+  },
+  {
+    name: 'create_bitable_field',
+    description: '[Official API] Create a new field (column) in a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        field_name: { type: 'string', description: 'Field display name' },
+        type: { type: 'number', description: 'Field type: 1=Text, 2=Number, 3=SingleSelect, 4=MultiSelect, 5=DateTime, 7=Checkbox, 11=User, 13=Phone, 15=URL, 17=Attachment, 18=Link, 20=Formula, 21=DuplexLink, 22=Location, 23=GroupChat, 1001=CreateTime, 1002=ModifiedTime, 1003=Creator, 1004=Modifier' },
+        property: { type: 'object', description: 'Field-type-specific properties (optional). E.g. for SingleSelect: {options: [{name:"A"},{name:"B"}]}' },
+      },
+      required: ['app_token', 'table_id', 'field_name', 'type'],
+    },
+  },
+  {
+    name: 'update_bitable_field',
+    description: '[Official API] Update an existing field (column) in a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        field_id: { type: 'string', description: 'Field ID to update' },
+        field_name: { type: 'string', description: 'New field name (optional)' },
+        type: { type: 'number', description: 'Field type (REQUIRED by Feishu API, see create_bitable_field for values)' },
+        property: { type: 'object', description: 'Field-type-specific properties (optional)' },
+      },
+      required: ['app_token', 'table_id', 'field_id', 'type'],
+    },
+  },
+  {
+    name: 'delete_bitable_field',
+    description: '[Official API] Delete a field (column) from a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        field_id: { type: 'string', description: 'Field ID to delete' },
+      },
+      required: ['app_token', 'table_id', 'field_id'],
+    },
+  },
+  {
+    name: 'list_bitable_views',
+    description: '[Official API] List all views in a Bitable table.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -482,6 +566,58 @@ const TOOLS = [
         fields: { type: 'object', description: 'Field name → new value mapping' },
       },
       required: ['app_token', 'table_id', 'record_id', 'fields'],
+    },
+  },
+  {
+    name: 'delete_bitable_record',
+    description: '[Official API] Delete a record (row) from a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        record_id: { type: 'string', description: 'Record ID to delete' },
+      },
+      required: ['app_token', 'table_id', 'record_id'],
+    },
+  },
+  {
+    name: 'batch_create_bitable_records',
+    description: '[Official API] Batch create multiple records (rows) in a Bitable table. Max 500 per call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        records: { type: 'array', description: 'Array of {fields: {field_name: value}} objects', items: { type: 'object' } },
+      },
+      required: ['app_token', 'table_id', 'records'],
+    },
+  },
+  {
+    name: 'batch_update_bitable_records',
+    description: '[Official API] Batch update multiple records in a Bitable table. Max 500 per call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        records: { type: 'array', description: 'Array of {record_id, fields: {field_name: value}} objects', items: { type: 'object' } },
+      },
+      required: ['app_token', 'table_id', 'records'],
+    },
+  },
+  {
+    name: 'batch_delete_bitable_records',
+    description: '[Official API] Batch delete multiple records from a Bitable table. Max 500 per call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        record_ids: { type: 'array', description: 'Array of record IDs to delete', items: { type: 'string' } },
+      },
+      required: ['app_token', 'table_id', 'record_ids'],
     },
   },
 
@@ -677,9 +813,24 @@ async function handleTool(name, args) {
       return text(chatId ? `P2P chat: ${chatId}` : 'Failed to create P2P chat');
     }
     case 'get_chat_info': {
-      const c = await getUserClient();
-      const info = await c.getGroupInfo(args.chat_id);
-      return info ? json(info) : text(`No info for chat ${args.chat_id}`);
+      // Strategy 1: Official API im.chat.get (supports oc_xxx format)
+      if (args.chat_id.startsWith('oc_')) {
+        try {
+          const info = await getOfficialClient().getChatInfo(args.chat_id);
+          return info ? json(info) : text(`No info for chat ${args.chat_id}`);
+        } catch (e) {
+          console.error(`[feishu-user-plugin] Official getChatInfo failed: ${e.message}`);
+        }
+      }
+      // Strategy 2: Protobuf gateway (supports numeric chat_id)
+      try {
+        const c = await getUserClient();
+        const info = await c.getGroupInfo(args.chat_id);
+        if (info) return json(info);
+      } catch (e) {
+        console.error(`[feishu-user-plugin] Protobuf getChatInfo failed: ${e.message}`);
+      }
+      return text(`No info for chat ${args.chat_id}`);
     }
     case 'get_user_info': {
       let n = null;
@@ -807,10 +958,34 @@ async function handleTool(name, args) {
 
     // --- Official API: Bitable ---
 
+    case 'create_bitable': {
+      const r = await getOfficialClient().createBitable(args.name, args.folder_id);
+      return text(`Bitable created: ${r.appToken}${r.url ? `\nURL: ${r.url}` : ''}`);
+    }
     case 'list_bitable_tables':
       return json(await getOfficialClient().listBitableTables(args.app_token));
+    case 'create_bitable_table':
+      return text(`Table created: ${(await getOfficialClient().createBitableTable(args.app_token, args.name, args.fields)).tableId}`);
     case 'list_bitable_fields':
       return json(await getOfficialClient().listBitableFields(args.app_token, args.table_id));
+    case 'create_bitable_field': {
+      const config = { field_name: args.field_name, type: args.type };
+      if (args.property) config.property = args.property;
+      return json(await getOfficialClient().createBitableField(args.app_token, args.table_id, config));
+    }
+    case 'update_bitable_field': {
+      const config = {};
+      if (args.field_name) config.field_name = args.field_name;
+      if (args.type) config.type = args.type;
+      if (args.property) config.property = args.property;
+      return json(await getOfficialClient().updateBitableField(args.app_token, args.table_id, args.field_id, config));
+    }
+    case 'delete_bitable_field': {
+      const r = await getOfficialClient().deleteBitableField(args.app_token, args.table_id, args.field_id);
+      return text(r.deleted ? `Field ${r.fieldId} deleted` : `Field deletion returned deleted=${r.deleted}`);
+    }
+    case 'list_bitable_views':
+      return json(await getOfficialClient().listBitableViews(args.app_token, args.table_id));
     case 'search_bitable_records':
       return json(await getOfficialClient().searchBitableRecords(args.app_token, args.table_id, {
         filter: args.filter, sort: args.sort, pageSize: args.page_size,
@@ -819,6 +994,14 @@ async function handleTool(name, args) {
       return text(`Record created: ${(await getOfficialClient().createBitableRecord(args.app_token, args.table_id, args.fields)).recordId}`);
     case 'update_bitable_record':
       return text(`Record updated: ${(await getOfficialClient().updateBitableRecord(args.app_token, args.table_id, args.record_id, args.fields)).recordId}`);
+    case 'delete_bitable_record':
+      return text(`Record deleted: ${(await getOfficialClient().deleteBitableRecord(args.app_token, args.table_id, args.record_id)).deleted}`);
+    case 'batch_create_bitable_records':
+      return json(await getOfficialClient().batchCreateBitableRecords(args.app_token, args.table_id, args.records));
+    case 'batch_update_bitable_records':
+      return json(await getOfficialClient().batchUpdateBitableRecords(args.app_token, args.table_id, args.records));
+    case 'batch_delete_bitable_records':
+      return json(await getOfficialClient().batchDeleteBitableRecords(args.app_token, args.table_id, args.record_ids));
 
     // --- Official API: Wiki ---
 

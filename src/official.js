@@ -187,7 +187,10 @@ class LarkOfficialClient {
       }),
       'uploadImage'
     );
-    return { imageKey: res.data.image_key };
+    // SDK multipart responses may have data at top level or nested under .data
+    const imageKey = res.data?.image_key || res.image_key;
+    if (!imageKey) throw new Error(`uploadImage: unexpected response structure: ${JSON.stringify(res).slice(0, 500)}`);
+    return { imageKey };
   }
 
   async uploadFile(filePath, fileType = 'stream', fileName) {
@@ -204,7 +207,10 @@ class LarkOfficialClient {
       }),
       'uploadFile'
     );
-    return { fileKey: res.data.file_key };
+    // SDK multipart responses may have data at top level or nested under .data
+    const fileKey = res.data?.file_key || res.file_key;
+    if (!fileKey) throw new Error(`uploadFile: unexpected response structure: ${JSON.stringify(res).slice(0, 500)}`);
+    return { fileKey };
   }
 
   // --- Docs ---
@@ -244,16 +250,72 @@ class LarkOfficialClient {
     return { items: res.data.items || [] };
   }
 
+  // --- Chat Info (Official API) ---
+
+  async getChatInfo(chatId) {
+    const res = await this._safeSDKCall(
+      () => this.client.im.chat.get({ path: { chat_id: chatId } }),
+      'getChatInfo'
+    );
+    return res.data;
+  }
+
   // --- Bitable ---
+
+  async createBitable(name, folderId) {
+    const data = {};
+    if (name) data.name = name;
+    if (folderId) data.folder_token = folderId;
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.app.create({ data }),
+      'createBitable'
+    );
+    return { appToken: res.data.app?.app_token, name: res.data.app?.name, url: res.data.app?.url };
+  }
 
   async listBitableTables(appToken) {
     const res = await this._safeSDKCall(() => this.client.bitable.appTable.list({ path: { app_token: appToken } }), 'listTables');
     return { items: res.data.items || [] };
   }
 
+  async createBitableTable(appToken, name, fields) {
+    const data = { table: { name } };
+    if (fields && fields.length > 0) data.table.default_view_name = name;
+    if (fields && fields.length > 0) data.table.fields = fields;
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTable.create({ path: { app_token: appToken }, data }),
+      'createTable'
+    );
+    return { tableId: res.data.table_id };
+  }
+
   async listBitableFields(appToken, tableId) {
     const res = await this._safeSDKCall(() => this.client.bitable.appTableField.list({ path: { app_token: appToken, table_id: tableId } }), 'listFields');
     return { items: res.data.items || [] };
+  }
+
+  async createBitableField(appToken, tableId, fieldConfig) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableField.create({ path: { app_token: appToken, table_id: tableId }, data: fieldConfig }),
+      'createField'
+    );
+    return { field: res.data.field };
+  }
+
+  async updateBitableField(appToken, tableId, fieldId, fieldConfig) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableField.update({ path: { app_token: appToken, table_id: tableId, field_id: fieldId }, data: fieldConfig }),
+      'updateField'
+    );
+    return { field: res.data.field };
+  }
+
+  async deleteBitableField(appToken, tableId, fieldId) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableField.delete({ path: { app_token: appToken, table_id: tableId, field_id: fieldId } }),
+      'deleteField'
+    );
+    return { fieldId: res.data.field_id, deleted: res.data.deleted };
   }
 
   async searchBitableRecords(appToken, tableId, { filter, sort, pageSize = 20, pageToken } = {}) {
@@ -283,6 +345,46 @@ class LarkOfficialClient {
       'updateRecord'
     );
     return { recordId: res.data.record?.record_id };
+  }
+
+  async deleteBitableRecord(appToken, tableId, recordId) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableRecord.delete({ path: { app_token: appToken, table_id: tableId, record_id: recordId } }),
+      'deleteRecord'
+    );
+    return { deleted: res.data.deleted };
+  }
+
+  async batchCreateBitableRecords(appToken, tableId, records) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableRecord.batchCreate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
+      'batchCreateRecords'
+    );
+    return { records: res.data.records || [] };
+  }
+
+  async batchUpdateBitableRecords(appToken, tableId, records) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableRecord.batchUpdate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
+      'batchUpdateRecords'
+    );
+    return { records: res.data.records || [] };
+  }
+
+  async batchDeleteBitableRecords(appToken, tableId, recordIds) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableRecord.batchDelete({ path: { app_token: appToken, table_id: tableId }, data: { records: recordIds } }),
+      'batchDeleteRecords'
+    );
+    return { records: res.data.records || [] };
+  }
+
+  async listBitableViews(appToken, tableId) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableView.list({ path: { app_token: appToken, table_id: tableId }, params: { page_size: 50 } }),
+      'listViews'
+    );
+    return { items: res.data.items || [] };
   }
 
   // --- Wiki ---
@@ -369,7 +471,9 @@ class LarkOfficialClient {
   async _safeSDKCall(fn, label = 'API') {
     try {
       const res = await fn();
-      if (res.code !== 0) throw new Error(`${label} failed (${res.code}): ${res.msg}`);
+      // SDK returns abbreviated responses for multipart uploads (code/msg undefined)
+      // Only treat as error if code is explicitly non-zero
+      if (res.code !== undefined && res.code !== 0) throw new Error(`${label} failed (${res.code}): ${res.msg}`);
       return res;
     } catch (err) {
       // Lark SDK uses axios; extract actual Feishu error from response body
