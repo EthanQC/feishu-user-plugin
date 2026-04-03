@@ -316,6 +316,12 @@ cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.c
 3. `git tag v1.x.x && git push && git push --tags`
 4. GitHub Actions auto-publishes to npm. Users get the new version on next Claude Code restart.
 
+### Syncing to team-skills (after any CLAUDE.md or skills change)
+1. Copy CLAUDE.md to skill reference: `cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md`
+2. Sync to team-skills repo: `cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/`
+3. Also sync plugin.json: `cp .claude-plugin/plugin.json /Users/abble/team-skills/plugins/feishu-user-plugin/.claude-plugin/`
+4. Commit and push both repos
+
 ### Testing a tool
 - For Official API tools: can test directly via MCP tool call or standalone script using `readCredentials()` from `src/config.js`
 - For Cookie tools: need active session, test via MCP tool call
