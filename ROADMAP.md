@@ -1,82 +1,89 @@
-# feishu-user-plugin 开发计划
+# feishu-user-plugin Roadmap
 
-## v1.1 — 待验证功能补全
+## 已完成
 
-以下功能代码已实现，但因需要外部资源或特定环境尚未实测。
+### v1.0 — 核心功能
+- [x] Cookie 身份消息发送（text, image, file, post, sticker, audio）
+- [x] 联系人搜索、P2P 聊天创建
+- [x] Official API 消息读取（bot + UAT 双路）
+- [x] 文档搜索/读取/创建、Doc blocks
+- [x] Bitable 基础查询（list tables/fields, search records）
+- [x] Bitable 基础写入（create/update record）
+- [x] Wiki 空间/搜索/节点
+- [x] Drive 文件列表/创建文件夹
+- [x] 联系人查找（email/mobile）
+- [x] 三层认证（Cookie + App + UAT）+ 自动刷新
+- [x] Playwright 自动化 Cookie 提取流程
+- [x] CLI 工具（setup, oauth, status, keepalive）
+- [x] CI/CD 自动发布（GitHub Actions → npm）
+- [x] 9 个 Skills（/send, /reply, /digest, /search, /doc, /table, /wiki, /drive, /status）
 
-### 需要文件上传支持的消息类型
-- [ ] `send_image_as_user` — 需要先上传图片获取 `image_key`，再调用发送
-- [ ] `send_file_as_user` — 需要先上传文件获取 `file_key`，再调用发送
-- [ ] `send_sticker_as_user` — 需要 `sticker_id` + `sticker_set_id`
-- [ ] `send_audio_as_user` — 需要先上传音频获取 `audio_key`
+### v1.2.1 — Bitable 完整化 + Bug 修复
+- [x] upload_image / upload_file 修复（SDK multipart 响应兼容）
+- [x] get_chat_info 支持 oc_xxx 格式（Official API + protobuf 双路）
+- [x] create_bitable — 创建多维表格应用
+- [x] create_bitable_table — 创建数据表
+- [x] create/update/delete_bitable_field — 字段管理
+- [x] delete_bitable_record — 单条删除
+- [x] batch_create/update/delete_bitable_records — 批量操作（max 500）
+- [x] list_bitable_views — 视图列表
 
-**解决方案**：实现图片/文件上传工具（`upload_image`、`upload_file`），支持从本地路径或 URL 上传，返回 key 后自动发送。或集成 feishu-file-bridge。
+## v1.3 — 计划中
 
-### 需要真实多维表格的 Bitable 操作
-- [ ] `list_bitable_tables` — 列出表格
-- [ ] `list_bitable_fields` — 列出字段
-- [ ] `search_bitable_records` — 查询记录
-- [ ] `create_bitable_record` — 创建记录
-- [ ] `update_bitable_record` — 更新记录
+### WebSocket 实时事件（核心方向）
 
-**解决方案**：创建一个测试用多维表格，写入 app_token 到测试脚本中做端到端验证。
+**目标**：让 MCP server 能接收飞书实时事件，从"单向操作"变成"双向对话"。
 
-### 有副作用跳过的操作
-- [ ] `forward_message` — 转发消息（跳过原因：会产生实际通知）
-- [ ] `create_folder` — 创建云盘文件夹（跳过原因：会产生真实文件夹）
+**解锁的场景**：
+- 对话式协作：发消息后等待对方回复，自动获取回复内容
+- 群消息监控：实时监听指定群的新消息并总结
+- 事件驱动：审批通过/拒绝、文档评论、日程变更等实时通知
 
-**解决方案**：在测试群/测试文件夹中验证后清理。
+**技术方案**：
+- 飞书支持 WebSocket 长连接（仅 feishu.cn，不支持 Lark 国际版）
+- 不需要公网 URL，只需出站网络
+- 使用已有的 `@larksuiteoapi/node-sdk` 的 `WSClient`
+- MCP server 启动时后台开 WebSocket，事件缓存到内存队列
+- 新增 `get_new_events` tool，Claude 调用时返回缓存的事件
 
-## v1.2 — 多账号灵活切换
+**前置条件**：
+- Bot 需要在飞书开放平台后台开通事件订阅权限
+- 需要设计事件缓存策略（内存上限、过期清理、隐私考量）
+- 需要处理 WebSocket 断线重连
 
-### 需求
-当前 MCP server 启动时绑定一组凭证（LARK_COOKIE + APP_ID/SECRET + UAT），无法在运行时切换用户身份。多人协作或管理多个飞书账号时需要灵活切换。
+**实现清单**：
+- [ ] EventBuffer 类（内存队列、容量上限、按时间/chat_id 过滤）
+- [ ] WSClient 启动逻辑（集成到 main 函数，和 MCP stdio 互不干扰）
+- [ ] im.message.receive_v1 事件处理
+- [ ] get_new_events tool 定义和 handler
+- [ ] 断线重连 + 错误处理
+- [ ] 文档：事件订阅配置指南
+- [ ] 可选：更多事件类型（审批、日程、文档评论）
 
-### 方案设计
+### 多账号切换
 
-#### 方案 A：配置文件多 Profile
-```json
-// .env.profiles 或 .feishu-profiles.json
-{
-  "default": {
-    "LARK_COOKIE": "...",
-    "LARK_APP_ID": "cli_xxx",
-    "LARK_APP_SECRET": "xxx"
-  },
-  "work": {
-    "LARK_COOKIE": "...",
-    "LARK_APP_ID": "cli_yyy",
-    "LARK_APP_SECRET": "yyy"
-  }
-}
-```
-- 新增 MCP 工具 `switch_profile` — 运行时切换凭证 profile
-- 新增 MCP 工具 `list_profiles` — 列出可用 profile
-- Client 和 Official 实例重新初始化
+**方案 A（推荐）**：配置文件多 Profile
+- `switch_profile` / `list_profiles` 工具
+- Client 和 Official 实例热重载
+- Cookie 和 UAT 按 profile 独立管理
 
-#### 方案 B：MCP 多实例
-在 `.mcp.json` 中注册多个 server 实例，每个绑定不同凭证：
-```json
-{
-  "feishu-personal": { "command": "npx", "args": ["-y", "feishu-user-plugin"], "env": { "LARK_COOKIE": "..." } },
-  "feishu-work": { "command": "npx", "args": ["-y", "feishu-user-plugin"], "env": { "LARK_COOKIE": "..." } }
-}
-```
-- 优点：无需代码改动，Claude Code 原生支持
-- 缺点：每个实例独立进程，资源开销大
+**方案 B（零代码方案）**：MCP 多实例
+- 在 `~/.claude.json` 注册多个 server 实例，每个绑定不同凭证
+- 优点：无需代码改动；缺点：每个实例独立进程
 
-#### 推荐
-方案 A 更灵活且资源友好，但方案 B 零代码改动可立即使用。建议先文档化方案 B 作为即时方案，v1.2 实现方案 A 作为正式功能。
-
-### 实现清单
-- [ ] 设计 profile 配置文件格式
-- [ ] 实现 `switch_profile` / `list_profiles` 工具
-- [ ] Client 和 Official 实例热重载
-- [ ] Cookie 和 UAT 按 profile 独立管理
-- [ ] 文档：多账号配置指南
-
-## v1.3 — 其他规划
-- [ ] CARD 消息类型 (type=14) 支持 — 需要逆向 card JSON schema
-- [ ] 图片/文件上传工具 — 本地文件 → image_key/file_key 一步到位
+### 其他
+- [ ] CARD 消息类型 (type=14) — 需要逆向 card JSON schema
 - [ ] 消息搜索 — 按关键词搜索聊天历史
 - [ ] 批量消息发送 — 群发给多个用户/群
+
+## 已调研但暂不实施
+
+### Token 优化（文档转 Markdown）
+- `get_doc_blocks` 返回的 JSON 比等价 markdown 大 2-3x（实测 216KB vs 90KB）
+- 但 `read_doc` 已返回纯文本，`get_doc_blocks` 用户就是要结构化数据
+- 如有需求可加 `read_doc_markdown` 工具，使用 `feishu-docx` 做客户端转换
+
+### Tool 数量精简
+- 46 个 tool 每个消耗 550-1400 tokens（合计 25K-64K）
+- Claude Code 的 Tool Search 已自动延迟加载，实测降低 46.9% 开销
+- Cursor 限 40 个 tool，如需兼容再考虑拆分/合并

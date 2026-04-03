@@ -283,6 +283,38 @@ cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.c
 # Do NOT copy .mcp.json — team-skills plugin should not have one
 ```
 
+## Development Workflow
+
+### When adding new tools
+1. Add method to `src/official.js`（Official API）or `src/client.js`（Cookie 身份）
+2. Add tool definition to `TOOLS` array in `src/index.js`
+3. Add handler case in `handleTool()` switch in `src/index.js`
+4. Run `node -c src/official.js && node -c src/index.js` to verify syntax
+5. Update this file (CLAUDE.md) — tool count, tool list, usage patterns
+6. Update ROADMAP.md if relevant
+
+### When fixing bugs
+1. Write a standalone test script (`node -e "..."`) to reproduce the bug before fixing
+2. After fixing, verify with the same script
+3. If the bug affects MCP tool behavior, test via MCP tool call after server restart
+
+### Commit conventions
+- `feat:` new tools or capabilities
+- `fix:` bug fixes
+- `docs:` CLAUDE.md, ROADMAP.md, README updates
+- `chore:` dependencies, CI, config changes
+
+### Publishing
+1. Update `version` in `package.json`
+2. `git add <files> && git commit -m "v1.x.x: description"`
+3. `git tag v1.x.x && git push && git push --tags`
+4. GitHub Actions auto-publishes to npm. Users get the new version on next Claude Code restart.
+
+### Testing a tool
+- For Official API tools: can test directly via MCP tool call or standalone script using `readCredentials()` from `src/config.js`
+- For Cookie tools: need active session, test via MCP tool call
+- Always verify `_safeSDKCall` handles the response format (multipart uploads return data at top level, not nested under `.data`)
+
 ## Known Limitations
 - CARD message type (type=14) not yet implemented — complex JSON schema
 - External tenant users may not be resolvable via `get_user_info` (contact API scope limitation)
