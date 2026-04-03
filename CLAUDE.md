@@ -285,6 +285,12 @@ cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.c
 
 ## Development Workflow
 
+### Keeping ROADMAP.md up to date
+- When completing a feature or fixing a bug, check the corresponding item in ROADMAP.md as `[x]` done
+- When discovering new bugs, limitations, or feature ideas during development, add them to the appropriate section in ROADMAP.md
+- When a version is released (tag pushed), move completed items under the "已完成" section with the version number
+- When researching a direction and deciding not to implement, add it to "已调研但暂不实施" with the reasoning
+
 ### When adding new tools
 1. Add method to `src/official.js`（Official API）or `src/client.js`（Cookie 身份）
 2. Add tool definition to `TOOLS` array in `src/index.js`
