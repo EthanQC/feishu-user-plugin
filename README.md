@@ -3,22 +3,25 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
-[![Tools](https://img.shields.io/badge/Tools-33-orange.svg)](#tools-33-total)
+[![Tools](https://img.shields.io/badge/Tools-76-orange.svg)](#tools)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**All-in-one Feishu/Lark MCP Server -- 33 tools, 9 skills, 3 auth layers for messaging, docs, tables, wiki, and drive.**
+**All-in-one Feishu/Lark MCP Server -- 76 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, and more.**
 
-The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API for documents, spreadsheets, wikis, and more.
+The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API. Works with Claude Code, Cursor, Windsurf, OpenClaw, and any MCP-compatible client.
 
 ## Highlights
 
 - **Send as yourself** -- Messages show your real name, not a bot. Supports text, rich text, images, files, stickers, and audio.
 - **Read everything** -- Group chats via bot API, P2P (direct messages) via OAuth UAT.
-- **Full Feishu suite** -- Docs, Bitable (spreadsheets), Wiki, Drive, Contacts -- all in one plugin.
-- **3 auth layers** -- Cookie-based user identity, app credentials (Official API), and OAuth UAT (P2P reading). All three are needed for full functionality.
+- **Full Feishu suite** -- Docs, Bitable, Wiki, Drive, Calendar, Tasks, Contacts -- all in one plugin.
+- **3 auth layers** -- Cookie-based user identity, app credentials (Official API), and OAuth UAT (P2P reading).
+- **Group management** -- Create groups, add/remove members, pin messages, emoji reactions.
+- **Document editing** -- Not just read/create, but insert/update/delete content blocks.
+- **Calendar & Tasks** -- Create events, check free/busy, manage tasks.
 - **9 slash commands** for Claude Code -- `/send`, `/reply`, `/search`, `/digest`, `/doc`, `/table`, `/wiki`, `/drive`, `/status`
 - **Auto session management** -- Cookie heartbeat every 4h, UAT auto-refresh with token rotation.
-- **Chat name resolution** -- Pass a group name instead of `oc_xxx` ID; it resolves automatically.
+- **Multi-platform** -- Claude Code, Cursor, Windsurf, VS Code, OpenClaw.
 
 ## Why This Exists
 
@@ -284,6 +287,34 @@ Add to `.vscode/mcp.json` in your project:
 }
 ```
 
+### OpenClaw
+
+Add to `~/.openclaw/openclaw.json` (note: key path is `mcp.servers`, not `mcpServers`):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "feishu-user-plugin": {
+        "command": "npx",
+        "args": ["-y", "feishu-user-plugin"],
+        "env": {
+          "LARK_COOKIE": "your-cookie-string",
+          "LARK_APP_ID": "cli_xxxxxxxxxxxx",
+          "LARK_APP_SECRET": "your-app-secret",
+          "LARK_USER_ACCESS_TOKEN": "your-uat",
+          "LARK_USER_REFRESH_TOKEN": "your-refresh-token"
+        }
+      }
+    }
+  }
+}
+```
+
+Or via CLI: `openclaw mcp set feishu-user-plugin '{"command":"npx","args":["-y","feishu-user-plugin"],"env":{...}}'`
+
+> OpenClaw's built-in Feishu channel handles receiving messages (bot identity). This plugin adds user identity messaging + docs/bitable/calendar/tasks.
+
 ### Windsurf
 
 Add to `~/.codeium/windsurf/mcp_config.json`:
@@ -306,86 +337,119 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-## Tools (33 total)
+## Tools (76 total)
 
-### User Identity -- Messaging (cookie auth, Protobuf)
-
-Send messages as yourself, not as a bot.
+### User Identity -- Messaging (8 tools, cookie auth)
 
 | Tool | Description |
 |------|-------------|
 | `send_to_user` | Search user by name + send text -- one step |
 | `send_to_group` | Search group by name + send text -- one step |
-| `send_as_user` | Send text to any chat by ID, supports reply threading (`root_id` / `parent_id`) |
-| `send_image_as_user` | Send image (requires `image_key` from upload) |
-| `send_file_as_user` | Send file (requires `file_key` from upload) |
-| `send_post_as_user` | Send rich text with title + formatted paragraphs (links, @mentions) |
+| `send_as_user` | Send text to any chat by ID, supports reply threading |
+| `send_image_as_user` | Send image (requires `image_key` from `upload_image`) |
+| `send_file_as_user` | Send file (requires `file_key` from `upload_file`) |
+| `send_post_as_user` | Send rich text with title + formatted paragraphs |
 | `send_sticker_as_user` | Send sticker/emoji |
 | `send_audio_as_user` | Send audio message |
 
-### User Identity -- Contacts & Info (cookie auth)
+### User Identity -- Contacts & Info (5 tools, cookie auth)
 
 | Tool | Description |
 |------|-------------|
 | `search_contacts` | Search users, bots, or group chats by name |
-| `create_p2p_chat` | Create/get P2P (direct message) chat, returns numeric `chat_id` |
-| `get_chat_info` | Group details: name, description, member count, owner |
+| `create_p2p_chat` | Create/get P2P (direct message) chat |
+| `get_chat_info` | Group details (supports both oc_xxx and numeric ID) |
 | `get_user_info` | User display name lookup by user ID |
 | `get_login_status` | Check cookie, app credentials, and UAT status |
 
-### User OAuth UAT -- P2P Chat Reading
+### User OAuth UAT -- P2P Chat Reading (2 tools)
 
 | Tool | Description |
 |------|-------------|
-| `read_p2p_messages` | Read P2P (direct message) history. Works for chats the bot cannot access. |
-| `list_user_chats` | List group chats the user is in. Note: only returns groups, not P2P. |
+| `read_p2p_messages` | Read P2P (direct message) history |
+| `list_user_chats` | List group chats the user is in |
 
-### Official API -- IM (Bot Identity)
+### Official API -- IM (17 tools)
 
 | Tool | Description |
 |------|-------------|
 | `list_chats` | List all chats the bot has joined |
-| `read_messages` | Read message history (accepts chat name or `oc_xxx` ID) |
-| `reply_message` | Reply to a specific message by `message_id` (as bot) |
+| `read_messages` | Read message history (accepts chat name, oc_xxx, or numeric ID) |
+| `send_message_as_bot` | Send message as bot to any chat |
+| `reply_message` | Reply to a specific message (as bot) |
 | `forward_message` | Forward a message to another chat |
+| `delete_message` | Recall/delete a bot message |
+| `update_message` | Edit a sent bot message |
+| `add_reaction` | Add emoji reaction to a message |
+| `delete_reaction` | Remove emoji reaction |
+| `pin_message` | Pin a message in chat |
+| `unpin_message` | Unpin a message |
+| `create_group` | Create a new group chat |
+| `update_group` | Update group name/description |
+| `list_members` | List group members |
+| `add_members` | Add users to a group |
+| `remove_members` | Remove users from a group |
+| `upload_image` / `upload_file` | Upload image/file, returns key for sending |
 
-### Official API -- Documents
+### Official API -- Documents (7 tools)
 
 | Tool | Description |
 |------|-------------|
 | `search_docs` | Search documents by keyword |
-| `read_doc` | Read raw text content of a document |
+| `read_doc` | Read raw text content |
+| `get_doc_blocks` | Get structured block tree |
 | `create_doc` | Create a new document |
+| `create_doc_block` | Insert content blocks into a document |
+| `update_doc_block` | Update a specific block |
+| `delete_doc_blocks` | Delete a range of blocks |
 
-### Official API -- Bitable (Spreadsheets)
-
-| Tool | Description |
-|------|-------------|
-| `list_bitable_tables` | List all tables in a Bitable app |
-| `list_bitable_fields` | List all fields (columns) in a table |
-| `search_bitable_records` | Query records with filter and sort |
-| `create_bitable_record` | Create a new record (row) |
-| `update_bitable_record` | Update an existing record |
-
-### Official API -- Wiki
+### Official API -- Bitable (17 tools)
 
 | Tool | Description |
 |------|-------------|
-| `list_wiki_spaces` | List all accessible wiki spaces |
-| `search_wiki` | Search wiki/docs by keyword |
-| `list_wiki_nodes` | Browse wiki node tree |
+| `create_bitable` | Create a new Bitable app |
+| `list_bitable_tables` / `create_bitable_table` / `delete_bitable_table` | Table management |
+| `list_bitable_fields` / `create_bitable_field` / `update_bitable_field` / `delete_bitable_field` | Field management |
+| `list_bitable_views` | List views |
+| `search_bitable_records` / `get_bitable_record` | Query records |
+| `create_bitable_record` / `update_bitable_record` / `delete_bitable_record` | Single record CRUD |
+| `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` | Batch operations (max 500/call) |
 
-### Official API -- Drive
+### Official API -- Calendar (5 tools)
+
+| Tool | Description |
+|------|-------------|
+| `list_calendars` | List accessible calendars |
+| `create_calendar_event` | Create a calendar event |
+| `list_calendar_events` | List events in a calendar |
+| `delete_calendar_event` | Delete an event |
+| `get_freebusy` | Check user availability |
+
+### Official API -- Tasks (5 tools)
+
+| Tool | Description |
+|------|-------------|
+| `create_task` | Create a task |
+| `get_task` | Get task details |
+| `list_tasks` | List tasks |
+| `update_task` | Update a task |
+| `complete_task` | Mark task as complete |
+
+### Official API -- Drive (5 tools)
 
 | Tool | Description |
 |------|-------------|
 | `list_files` | List files in a folder |
 | `create_folder` | Create a new folder |
+| `copy_file` | Copy a file |
+| `move_file` | Move a file |
+| `delete_file` | Delete a file/folder |
 
-### Official API -- Contacts
+### Official API -- Wiki & Contacts (4 tools)
 
 | Tool | Description |
 |------|-------------|
+| `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` | Wiki spaces, search, browse |
 | `find_user` | Find user by email or mobile number |
 
 ## Claude Code Slash Commands (9 skills)
@@ -444,7 +508,7 @@ feishu-user-plugin/
 │       ├── SKILL.md         # Main skill definition (trigger, tools, auth)
 │       └── references/      # 8 skill reference docs + CLAUDE.md
 ├── src/
-│   ├── index.js             # MCP server entry point (33 tools)
+│   ├── index.js             # MCP server entry point (76 tools)
 │   ├── client.js            # User identity client (Protobuf gateway)
 │   ├── official.js          # Official API client (REST, UAT)
 │   ├── utils.js             # ID generators, cookie parser

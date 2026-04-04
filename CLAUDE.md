@@ -315,6 +315,16 @@ cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.c
 
 ## Development Workflow
 
+### Keeping all docs in sync
+When making ANY code change (new tools, bug fixes, features), update ALL of these:
+- `CLAUDE.md` — tool count, tool list, usage patterns, known limitations
+- `ROADMAP.md` — check off completed items, add new findings
+- `README.md` — tool count (badge + heading + list), feature highlights, config examples
+- `skills/feishu-user-plugin/references/CLAUDE.md` — copy from root CLAUDE.md
+- `package.json` — version, description (tool count)
+- Sync to team-skills: `cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/`
+- If prompts changed: also sync `prompts/` to team-skills
+
 ### Keeping ROADMAP.md up to date
 - When completing a feature or fixing a bug, check the corresponding item in ROADMAP.md as `[x]` done
 - When discovering new bugs, limitations, or feature ideas during development, add them to the appropriate section in ROADMAP.md
