@@ -317,13 +317,29 @@ cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.c
 
 ### Keeping all docs in sync
 When making ANY code change (new tools, bug fixes, features), update ALL of these:
+
+**本仓库内：**
 - `CLAUDE.md` — tool count, tool list, usage patterns, known limitations
+- `README.md` — tool count (badge + heading + tool table), feature highlights, OpenClaw/Claude Code config examples
 - `ROADMAP.md` — check off completed items, add new findings
-- `README.md` — tool count (badge + heading + list), feature highlights, config examples
-- `skills/feishu-user-plugin/references/CLAUDE.md` — copy from root CLAUDE.md
 - `package.json` — version, description (tool count)
-- Sync to team-skills: `cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/`
-- If prompts changed: also sync `prompts/` to team-skills
+- `skills/feishu-user-plugin/references/CLAUDE.md` — always copy from root: `cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md`
+- `prompts/openclaw-setup.md` — if OpenClaw 相关配置变了要更新
+
+**team-skills 仓库 (`/Users/abble/team-skills/plugins/feishu-user-plugin/`)：**
+- `skills/` — 同步技能文件: `cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/`
+- `README.md` — team-skills 有自己的 README（含团队 APP_ID/SECRET），需要同步更新：工具数量、功能列表、更新日志、安装 prompt
+- 两个 README 都必须包含 Claude Code 安装 prompt 和 OpenClaw 安装 prompt
+- team-skills README 的安装 prompt 包含团队共享的 APP_ID/SECRET（hardcoded），本仓库 README 用占位符
+
+**同步命令（每次发版后执行）：**
+```bash
+# 1. 同步 skills
+cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md
+cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/
+# 2. 手动更新 team-skills README（工具数、功能列表、更新日志）
+# 3. 提交并推送两个仓库
+```
 
 ### Keeping ROADMAP.md up to date
 - When completing a feature or fixing a bug, check the corresponding item in ROADMAP.md as `[x]` done
