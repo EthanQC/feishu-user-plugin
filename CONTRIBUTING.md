@@ -43,11 +43,15 @@ node src/test-all.js               # Full test suite (sends real messages)
 
 ## Submitting Changes
 
+> **Important**: Direct pushes to `main` are blocked. All changes must go through a Pull Request with CI passing.
+
 1. Create a feature branch: `git checkout -b feature/my-change`
 2. Make your changes
 3. Test with `node src/test-all.js`
-4. Commit with a descriptive message
-5. Push and open a Pull Request
+4. Run syntax check: `node -c src/index.js && node -c src/official.js`
+5. Commit with a descriptive message
+6. Push your branch and open a Pull Request
+7. Wait for CI checks to pass, then merge
 
 ### Commit Messages
 
