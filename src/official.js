@@ -4,7 +4,14 @@ class LarkOfficialClient {
   constructor(appId, appSecret) {
     this.appId = appId;
     this.appSecret = appSecret;
-    this.client = new lark.Client({ appId, appSecret, disableTokenCache: false });
+    const stderrLogger = {
+      error: (...msg) => console.error('[lark-sdk][error]:', ...msg),
+      warn:  (...msg) => console.error('[lark-sdk][warn]:', ...msg),
+      info:  (...msg) => {},
+      debug: (...msg) => {},
+      trace: (...msg) => {},
+    };
+    this.client = new lark.Client({ appId, appSecret, disableTokenCache: false, logger: stderrLogger, loggerLevel: lark.LoggerLevel.warn });
     this._uat = null;
     this._uatRefresh = null;
     this._uatExpires = 0;
