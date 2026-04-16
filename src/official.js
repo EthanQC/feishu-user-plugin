@@ -1,16 +1,20 @@
 const lark = require('@larksuiteoapi/node-sdk');
 
+// Redirect all Lark SDK logs to stderr.
+// The SDK's defaultLogger.error uses console.log (stdout), which corrupts
+// MCP's JSON-RPC stdio transport and causes session disconnects.
+const stderrLogger = {
+  error: (...msg) => console.error('[lark-sdk][error]:', ...msg),
+  warn:  (...msg) => console.error('[lark-sdk][warn]:', ...msg),
+  info:  () => {},
+  debug: () => {},
+  trace: () => {},
+};
+
 class LarkOfficialClient {
   constructor(appId, appSecret) {
     this.appId = appId;
     this.appSecret = appSecret;
-    const stderrLogger = {
-      error: (...msg) => console.error('[lark-sdk][error]:', ...msg),
-      warn:  (...msg) => console.error('[lark-sdk][warn]:', ...msg),
-      info:  (...msg) => {},
-      debug: (...msg) => {},
-      trace: (...msg) => {},
-    };
     this.client = new lark.Client({ appId, appSecret, disableTokenCache: false, logger: stderrLogger, loggerLevel: lark.LoggerLevel.warn });
     this._uat = null;
     this._uatRefresh = null;
@@ -241,20 +245,19 @@ class LarkOfficialClient {
 
   // --- IM: Pins ---
 
-  async pinMessage(messageId) {
-    const res = await this._safeSDKCall(
-      () => this.client.im.pin.create({ data: { message_id: messageId } }),
-      'pinMessage'
-    );
-    return { pin: res.data.pin };
-  }
-
-  async unpinMessage(messageId) {
+  async pinMessage(messageId, pinned = true) {
+    if (pinned) {
+      const res = await this._safeSDKCall(
+        () => this.client.im.pin.create({ data: { message_id: messageId } }),
+        'pinMessage'
+      );
+      return { pin: res.data.pin };
+    }
     await this._safeSDKCall(
       () => this.client.im.pin.delete({ data: { message_id: messageId } }),
       'unpinMessage'
     );
-    return { deleted: true };
+    return { unpinned: true };
   }
 
   // --- IM: Chat Management ---
@@ -579,6 +582,48 @@ class LarkOfficialClient {
     return { deleted: true };
   }
 
+  async getBitableMeta(appToken) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.app.get({ path: { app_token: appToken } }),
+      'getBitableMeta'
+    );
+    return { app: res.data.app };
+  }
+
+  async updateBitableTable(appToken, tableId, name) {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTable.patch({ path: { app_token: appToken, table_id: tableId }, data: { name } }),
+      'updateTable'
+    );
+    return { name: res.data.name };
+  }
+
+  async createBitableView(appToken, tableId, viewName, viewType = 'grid') {
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.appTableView.create({ path: { app_token: appToken, table_id: tableId }, data: { view_name: viewName, view_type: viewType } }),
+      'createView'
+    );
+    return { view: res.data.view };
+  }
+
+  async deleteBitableView(appToken, tableId, viewId) {
+    await this._safeSDKCall(
+      () => this.client.bitable.appTableView.delete({ path: { app_token: appToken, table_id: tableId, view_id: viewId } }),
+      'deleteView'
+    );
+    return { deleted: true };
+  }
+
+  async copyBitable(appToken, name, folderId) {
+    const data = { name };
+    if (folderId) data.folder_token = folderId;
+    const res = await this._safeSDKCall(
+      () => this.client.bitable.app.copy({ path: { app_token: appToken }, data }),
+      'copyBitable'
+    );
+    return { app: res.data.app };
+  }
+
   // --- Wiki ---
 
   async listWikiSpaces() {
@@ -686,109 +731,51 @@ class LarkOfficialClient {
     return allChats;
   }
 
-  // --- Calendar ---
+  // --- UAT-based creation (resources owned by user, not app) ---
 
-  async listCalendars() {
-    const res = await this._safeSDKCall(
-      () => this.client.calendar.calendar.list({ params: { page_size: 50 } }),
-      'listCalendars'
-    );
-    return { items: res.data.calendar_list || [] };
+  async createDocAsUser(title, folderId) {
+    const data = { title };
+    if (folderId) data.folder_token = folderId;
+    const result = await this._withUAT(async (uat) => {
+      const res = await fetch('https://open.feishu.cn/open-apis/docx/v1/documents', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${uat}`, 'content-type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    });
+    if (result.code !== 0) throw new Error(`createDocAsUser failed (${result.code}): ${result.msg}`);
+    return { documentId: result.data.document?.document_id };
   }
 
-  async createCalendarEvent(calendarId, event) {
-    const res = await this._safeSDKCall(
-      () => this.client.calendar.calendarEvent.create({
-        path: { calendar_id: calendarId },
-        data: event,
-      }),
-      'createCalendarEvent'
-    );
-    return { event: res.data.event };
+  async createBitableAsUser(name, folderId) {
+    const data = {};
+    if (name) data.name = name;
+    if (folderId) data.folder_token = folderId;
+    const result = await this._withUAT(async (uat) => {
+      const res = await fetch('https://open.feishu.cn/open-apis/bitable/v1/apps', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${uat}`, 'content-type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    });
+    if (result.code !== 0) throw new Error(`createBitableAsUser failed (${result.code}): ${result.msg}`);
+    return { appToken: result.data.app?.app_token, name: result.data.app?.name, url: result.data.app?.url };
   }
 
-  async listCalendarEvents(calendarId, { startTime, endTime, pageSize = 50, pageToken } = {}) {
-    const params = { page_size: pageSize };
-    if (startTime) params.start_time = startTime;
-    if (endTime) params.end_time = endTime;
-    if (pageToken) params.page_token = pageToken;
-    const res = await this._safeSDKCall(
-      () => this.client.calendar.calendarEvent.list({
-        path: { calendar_id: calendarId },
-        params,
-      }),
-      'listCalendarEvents'
-    );
-    return { items: res.data.items || [], hasMore: res.data.has_more, pageToken: res.data.page_token };
-  }
-
-  async deleteCalendarEvent(calendarId, eventId) {
-    await this._safeSDKCall(
-      () => this.client.calendar.calendarEvent.delete({
-        path: { calendar_id: calendarId, event_id: eventId },
-      }),
-      'deleteCalendarEvent'
-    );
-    return { deleted: true };
-  }
-
-  async getFreeBusy(userIds, startTime, endTime) {
-    const res = await this._safeSDKCall(
-      () => this.client.calendar.freebusy.list({
-        data: {
-          time_min: startTime,
-          time_max: endTime,
-          user_id: { user_ids: userIds, id_type: 'open_id' },
-        },
-      }),
-      'getFreeBusy'
-    );
-    return { freebusyList: res.data.freebusy_list || [] };
-  }
-
-  // --- Tasks ---
-
-  async createTask(task) {
-    const res = await this._safeSDKCall(
-      () => this.client.task.task.create({ data: task }),
-      'createTask'
-    );
-    return { task: res.data.task };
-  }
-
-  async getTask(taskId) {
-    const res = await this._safeSDKCall(
-      () => this.client.task.task.get({ path: { task_id: taskId } }),
-      'getTask'
-    );
-    return { task: res.data.task };
-  }
-
-  async listTasks({ pageSize = 50, pageToken } = {}) {
-    const res = await this._safeSDKCall(
-      () => this.client.task.task.list({ params: { page_size: pageSize, page_token: pageToken } }),
-      'listTasks'
-    );
-    return { items: res.data.items || [], hasMore: res.data.has_more, pageToken: res.data.page_token };
-  }
-
-  async updateTask(taskId, task) {
-    const res = await this._safeSDKCall(
-      () => this.client.task.task.patch({
-        path: { task_id: taskId },
-        data: task,
-      }),
-      'updateTask'
-    );
-    return { task: res.data.task };
-  }
-
-  async completeTask(taskId) {
-    const res = await this._safeSDKCall(
-      () => this.client.task.task.complete({ path: { task_id: taskId } }),
-      'completeTask'
-    );
-    return { completed: true };
+  async createFolderAsUser(name, parentToken) {
+    const data = { name, folder_token: parentToken || '' };
+    const result = await this._withUAT(async (uat) => {
+      const res = await fetch('https://open.feishu.cn/open-apis/drive/v1/files/create_folder', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${uat}`, 'content-type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      return res.json();
+    });
+    if (result.code !== 0) throw new Error(`createFolderAsUser failed (${result.code}): ${result.msg}`);
+    return { token: result.data.token };
   }
 
   // --- Safe SDK Call (extracts real Feishu error from AxiosError) ---

@@ -22,7 +22,8 @@ const APP_SECRET = creds.LARK_APP_SECRET;
 const PORT = 9997;
 const REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`;
 // offline_access is required to get refresh_token for auto-renewal
-const SCOPES = 'offline_access im:message im:message:readonly im:chat:readonly contact:user.base:readonly';
+// Write scopes (docx:document, drive:drive, bitable:app) allow creating resources as the user, not the app
+const SCOPES = 'offline_access auth:user.id:read im:message im:message:readonly im:chat im:chat:readonly contact:user.base:readonly contact:user.id:readonly docx:document drive:drive bitable:app wiki:wiki:readonly';
 
 if (!APP_ID || !APP_SECRET) {
   console.error('Missing LARK_APP_ID or LARK_APP_SECRET.');

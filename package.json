@@ -1,7 +1,7 @@
 {
   "name": "feishu-user-plugin",
-  "version": "1.3.0",
-  "description": "All-in-one Feishu plugin for Claude Code — messaging, docs, bitable, calendar, tasks, drive. 76 tools + 9 skills, 3 auth layers.",
+  "version": "1.3.1",
+  "description": "All-in-one Feishu plugin for Claude Code & Codex — messaging, docs, bitable, wiki, drive. 66 tools + 9 skills, 3 auth layers.",
   "main": "src/index.js",
   "bin": {
     "feishu-user-plugin": "src/cli.js"
@@ -10,7 +10,8 @@
     "start": "node src/index.js",
     "test": "node src/test-all.js",
     "test:quick": "node src/test-send.js",
-    "oauth": "node src/oauth.js"
+    "oauth": "node src/oauth.js",
+    "prepublishOnly": "node scripts/confirm-version.js"
   },
   "keywords": [
     "feishu",
@@ -37,6 +38,7 @@
   "files": [
     "src/",
     "proto/",
+    "scripts/",
     ".claude-plugin/",
     "skills/",
     ".mcp.json.example",

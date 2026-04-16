@@ -12,7 +12,7 @@
 const readline = require('readline');
 const { findMcpConfig, writeNewConfig } = require('./config');
 
-// Parse CLI args: --app-id, --app-secret, --cookie
+// Parse CLI args: --app-id, --app-secret, --cookie, --client
 function parseArgs() {
   const args = {};
   const argv = process.argv.slice(2);
@@ -20,6 +20,7 @@ function parseArgs() {
     if (argv[i] === '--app-id' && argv[i + 1]) args.appId = argv[++i];
     else if (argv[i] === '--app-secret' && argv[i + 1]) args.appSecret = argv[++i];
     else if (argv[i] === '--cookie' && argv[i + 1]) args.cookie = argv[++i];
+    else if (argv[i] === '--client' && argv[i + 1]) args.client = argv[++i];
   }
   return args;
 }
@@ -135,6 +136,20 @@ async function main() {
   const existingRT = existingEnv.LARK_USER_REFRESH_TOKEN;
   const hasUAT = existingUAT && existingUAT !== 'SETUP_NEEDED' && existingUAT.length > 20;
 
+  // Resolve target client
+  let client = cliArgs.client || null; // 'claude' | 'codex' | 'both' | null (interactive)
+  if (!client && !nonInteractive) {
+    console.log('\n--- Target Client ---');
+    console.log('  1. Claude Code (default)');
+    console.log('  2. Codex');
+    console.log('  3. Both');
+    const choice = (await ask('Choose target [1]: ')).trim();
+    if (choice === '2') client = 'codex';
+    else if (choice === '3') client = 'both';
+    else client = 'claude';
+  }
+  if (!client) client = 'claude';
+
   // Write config
   console.log('\n--- Writing Config ---');
 
@@ -146,8 +161,9 @@ async function main() {
     LARK_USER_REFRESH_TOKEN: hasUAT ? (existingRT || '') : '',
   };
 
-  const result = writeNewConfig(env);
-  console.log(`Written to ${result.configPath} (global)`);
+  const result = writeNewConfig(env, undefined, undefined, client);
+  if (result.configPath) console.log(`Written to ${result.configPath} (Claude Code)`);
+  if (result.codexConfigPath) console.log(`Written to ${result.codexConfigPath} (Codex)`);
 
   // Summary
   console.log('\n' + '='.repeat(60));

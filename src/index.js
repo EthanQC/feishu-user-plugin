@@ -542,48 +542,8 @@ const TOOLS = [
     },
   },
   {
-    name: 'create_bitable_record',
-    description: '[Official API] Create a new record (row) in a Bitable table.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_token: { type: 'string', description: 'Bitable app token' },
-        table_id: { type: 'string', description: 'Table ID' },
-        fields: { type: 'object', description: 'Field name → value mapping' },
-      },
-      required: ['app_token', 'table_id', 'fields'],
-    },
-  },
-  {
-    name: 'update_bitable_record',
-    description: '[Official API] Update an existing record in a Bitable table.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_token: { type: 'string', description: 'Bitable app token' },
-        table_id: { type: 'string', description: 'Table ID' },
-        record_id: { type: 'string', description: 'Record ID to update' },
-        fields: { type: 'object', description: 'Field name → new value mapping' },
-      },
-      required: ['app_token', 'table_id', 'record_id', 'fields'],
-    },
-  },
-  {
-    name: 'delete_bitable_record',
-    description: '[Official API] Delete a record (row) from a Bitable table.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        app_token: { type: 'string', description: 'Bitable app token' },
-        table_id: { type: 'string', description: 'Table ID' },
-        record_id: { type: 'string', description: 'Record ID to delete' },
-      },
-      required: ['app_token', 'table_id', 'record_id'],
-    },
-  },
-  {
     name: 'batch_create_bitable_records',
-    description: '[Official API] Batch create multiple records (rows) in a Bitable table. Max 500 per call.',
+    description: '[Official API] Create one or more records (rows) in a Bitable table. Pass a single record or up to 500.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -596,7 +556,7 @@ const TOOLS = [
   },
   {
     name: 'batch_update_bitable_records',
-    description: '[Official API] Batch update multiple records in a Bitable table. Max 500 per call.',
+    description: '[Official API] Update one or more records in a Bitable table. Pass a single record or up to 500.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -609,7 +569,7 @@ const TOOLS = [
   },
   {
     name: 'batch_delete_bitable_records',
-    description: '[Official API] Batch delete multiple records from a Bitable table. Max 500 per call.',
+    description: '[Official API] Delete one or more records from a Bitable table. Pass a single ID or up to 500.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -777,19 +737,13 @@ const TOOLS = [
   // ========== IM — Pin Messages ==========
   {
     name: 'pin_message',
-    description: '[Official API] Pin a message in a chat.',
+    description: '[Official API] Pin or unpin a message in a chat.',
     inputSchema: {
       type: 'object',
-      properties: { message_id: { type: 'string', description: 'Message ID to pin' } },
-      required: ['message_id'],
-    },
-  },
-  {
-    name: 'unpin_message',
-    description: '[Official API] Unpin a message from a chat.',
-    inputSchema: {
-      type: 'object',
-      properties: { message_id: { type: 'string', description: 'Message ID to unpin' } },
+      properties: {
+        message_id: { type: 'string', description: 'Message ID' },
+        pinned: { type: 'boolean', description: 'true to pin, false to unpin', default: true },
+      },
       required: ['message_id'],
     },
   },
@@ -835,27 +789,16 @@ const TOOLS = [
     },
   },
   {
-    name: 'add_members',
-    description: '[Official API] Add users to a group chat.',
+    name: 'manage_members',
+    description: '[Official API] Add or remove members from a group chat.',
     inputSchema: {
       type: 'object',
       properties: {
-        chat_id: { type: 'string', description: 'Chat ID (oc_xxx)' },
-        user_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids to add' },
+        chat_id: { type: 'string', description: 'Group chat ID (oc_xxx)' },
+        member_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids' },
+        action: { type: 'string', enum: ['add', 'remove'], description: 'Action to perform' },
       },
-      required: ['chat_id', 'user_ids'],
-    },
-  },
-  {
-    name: 'remove_members',
-    description: '[Official API] Remove users from a group chat.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        chat_id: { type: 'string', description: 'Chat ID (oc_xxx)' },
-        user_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids to remove' },
-      },
-      required: ['chat_id', 'user_ids'],
+      required: ['chat_id', 'member_ids', 'action'],
     },
   },
 
@@ -929,6 +872,71 @@ const TOOLS = [
     },
   },
 
+  {
+    name: 'get_bitable_meta',
+    description: '[Official API] Get metadata of a Bitable app (name, revision, etc.).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+      },
+      required: ['app_token'],
+    },
+  },
+  {
+    name: 'update_bitable_table',
+    description: '[Official API] Rename a data table in a Bitable app.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        name: { type: 'string', description: 'New table name' },
+      },
+      required: ['app_token', 'table_id', 'name'],
+    },
+  },
+  {
+    name: 'create_bitable_view',
+    description: '[Official API] Create a new view in a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        view_name: { type: 'string', description: 'View name' },
+        view_type: { type: 'string', description: 'View type: grid (default), kanban, gallery, form, gantt, calendar', default: 'grid' },
+      },
+      required: ['app_token', 'table_id', 'view_name'],
+    },
+  },
+  {
+    name: 'delete_bitable_view',
+    description: '[Official API] Delete a view from a Bitable table.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token' },
+        table_id: { type: 'string', description: 'Table ID' },
+        view_id: { type: 'string', description: 'View ID to delete' },
+      },
+      required: ['app_token', 'table_id', 'view_id'],
+    },
+  },
+  {
+    name: 'copy_bitable',
+    description: '[Official API] Copy a Bitable app to create a new one.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token to copy' },
+        name: { type: 'string', description: 'New Bitable name' },
+        folder_id: { type: 'string', description: 'Destination folder token (optional)' },
+      },
+      required: ['app_token', 'name'],
+    },
+  },
+
   // ========== Drive — File Operations ==========
   {
     name: 'copy_file',
@@ -969,125 +977,6 @@ const TOOLS = [
     },
   },
 
-  // ========== Calendar ==========
-  {
-    name: 'list_calendars',
-    description: '[Official API] List all calendars accessible by the bot.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'create_calendar_event',
-    description: '[Official API] Create a calendar event.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        calendar_id: { type: 'string', description: 'Calendar ID (from list_calendars)' },
-        summary: { type: 'string', description: 'Event title' },
-        start_time: { type: 'string', description: 'Start time (RFC3339 or Unix timestamp string)' },
-        end_time: { type: 'string', description: 'End time (RFC3339 or Unix timestamp string)' },
-        description: { type: 'string', description: 'Event description (optional)' },
-        location: { type: 'string', description: 'Event location (optional)' },
-      },
-      required: ['calendar_id', 'summary', 'start_time', 'end_time'],
-    },
-  },
-  {
-    name: 'list_calendar_events',
-    description: '[Official API] List events in a calendar.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        calendar_id: { type: 'string', description: 'Calendar ID' },
-        start_time: { type: 'string', description: 'Start time filter (Unix timestamp string, optional)' },
-        end_time: { type: 'string', description: 'End time filter (Unix timestamp string, optional)' },
-        page_size: { type: 'number', description: 'Items per page (default 50)' },
-      },
-      required: ['calendar_id'],
-    },
-  },
-  {
-    name: 'delete_calendar_event',
-    description: '[Official API] Delete a calendar event.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        calendar_id: { type: 'string', description: 'Calendar ID' },
-        event_id: { type: 'string', description: 'Event ID to delete' },
-      },
-      required: ['calendar_id', 'event_id'],
-    },
-  },
-  {
-    name: 'get_freebusy',
-    description: '[Official API] Check free/busy status of users for a time range.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        user_ids: { type: 'array', items: { type: 'string' }, description: 'Array of user open_ids to check' },
-        start_time: { type: 'string', description: 'Range start (RFC3339)' },
-        end_time: { type: 'string', description: 'Range end (RFC3339)' },
-      },
-      required: ['user_ids', 'start_time', 'end_time'],
-    },
-  },
-
-  // ========== Tasks ==========
-  {
-    name: 'create_task',
-    description: '[Official API] Create a new task in Feishu Tasks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        summary: { type: 'string', description: 'Task title/summary' },
-        description: { type: 'string', description: 'Task description (optional)' },
-        due: { type: 'string', description: 'Due date/time (RFC3339 or Unix timestamp string, optional)' },
-      },
-      required: ['summary'],
-    },
-  },
-  {
-    name: 'get_task',
-    description: '[Official API] Get task details by ID.',
-    inputSchema: {
-      type: 'object',
-      properties: { task_id: { type: 'string', description: 'Task ID' } },
-      required: ['task_id'],
-    },
-  },
-  {
-    name: 'list_tasks',
-    description: '[Official API] List tasks.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        page_size: { type: 'number', description: 'Items per page (default 50)' },
-        page_token: { type: 'string', description: 'Pagination token' },
-      },
-    },
-  },
-  {
-    name: 'update_task',
-    description: '[Official API] Update a task (title, description, due date, etc.).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        task_id: { type: 'string', description: 'Task ID' },
-        summary: { type: 'string', description: 'New title (optional)' },
-        description: { type: 'string', description: 'New description (optional)' },
-        due: { type: 'string', description: 'New due date (optional)' },
-      },
-      required: ['task_id'],
-    },
-  },
-  {
-    name: 'complete_task',
-    description: '[Official API] Mark a task as complete.',
-    inputSchema: {
-      type: 'object',
-      properties: { task_id: { type: 'string', description: 'Task ID to complete' } },
-      required: ['task_id'],
-    },
-  },
 ];
 
 // --- Server ---
@@ -1331,14 +1220,33 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().readDoc(args.document_id));
     case 'get_doc_blocks':
       return json(await getOfficialClient().getDocBlocks(args.document_id));
-    case 'create_doc':
-      return text(`Document created: ${(await getOfficialClient().createDoc(args.title, args.folder_id)).documentId}`);
+    case 'create_doc': {
+      const official = getOfficialClient();
+      if (official.hasUAT) {
+        try {
+          const result = await official.createDocAsUser(args.title, args.folder_id);
+          return text(`Document created (as user): ${result.documentId}`);
+        } catch (e) {
+          console.error(`[feishu-user-plugin] UAT createDoc failed, falling back to app: ${e.message}`);
+        }
+      }
+      return text(`Document created: ${(await official.createDoc(args.title, args.folder_id)).documentId}`);
+    }
 
     // --- Official API: Bitable ---
 
     case 'create_bitable': {
-      const r = await getOfficialClient().createBitable(args.name, args.folder_id);
-      return text(`Bitable created: ${r.appToken}${r.url ? `\nURL: ${r.url}` : ''}`);
+      const official = getOfficialClient();
+      if (official.hasUAT) {
+        try {
+          const r = await official.createBitableAsUser(args.name, args.folder_id);
+          return text(`Bitable created (as user): ${r.appToken}\nURL: ${r.url || ''}`);
+        } catch (e) {
+          console.error(`[feishu-user-plugin] UAT createBitable failed, falling back to app: ${e.message}`);
+        }
+      }
+      const r = await official.createBitable(args.name, args.folder_id);
+      return text(`Bitable created: ${r.appToken}\nURL: ${r.url || ''}`);
     }
     case 'list_bitable_tables':
       return json(await getOfficialClient().listBitableTables(args.app_token));
@@ -1368,12 +1276,6 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().searchBitableRecords(args.app_token, args.table_id, {
         filter: args.filter, sort: args.sort, pageSize: args.page_size,
       }));
-    case 'create_bitable_record':
-      return text(`Record created: ${(await getOfficialClient().createBitableRecord(args.app_token, args.table_id, args.fields)).recordId}`);
-    case 'update_bitable_record':
-      return text(`Record updated: ${(await getOfficialClient().updateBitableRecord(args.app_token, args.table_id, args.record_id, args.fields)).recordId}`);
-    case 'delete_bitable_record':
-      return text(`Record deleted: ${(await getOfficialClient().deleteBitableRecord(args.app_token, args.table_id, args.record_id)).deleted}`);
     case 'batch_create_bitable_records':
       return json(await getOfficialClient().batchCreateBitableRecords(args.app_token, args.table_id, args.records));
     case 'batch_update_bitable_records':
@@ -1394,8 +1296,17 @@ async function handleTool(name, args) {
 
     case 'list_files':
       return json(await getOfficialClient().listFiles(args.folder_token));
-    case 'create_folder':
-      return text(`Folder created: ${(await getOfficialClient().createFolder(args.name, args.parent_token)).token}`);
+    case 'create_folder': {
+      const official = getOfficialClient();
+      if (official.hasUAT) {
+        try {
+          return text(`Folder created (as user): ${(await official.createFolderAsUser(args.name, args.parent_token)).token}`);
+        } catch (e) {
+          console.error(`[feishu-user-plugin] UAT createFolder failed, falling back to app: ${e.message}`);
+        }
+      }
+      return text(`Folder created: ${(await official.createFolder(args.name, args.parent_token)).token}`);
+    }
 
     // --- Official API: Contact ---
 
@@ -1434,9 +1345,7 @@ async function handleTool(name, args) {
     // --- Official API: Pins ---
 
     case 'pin_message':
-      return json(await getOfficialClient().pinMessage(args.message_id));
-    case 'unpin_message':
-      return text(`Unpinned: ${(await getOfficialClient().unpinMessage(args.message_id)).deleted}`);
+      return json(await getOfficialClient().pinMessage(args.message_id, args.pinned !== false));
 
     // --- Official API: Chat Management ---
 
@@ -1446,13 +1355,12 @@ async function handleTool(name, args) {
       return text(`Group updated: ${(await getOfficialClient().updateChat(args.chat_id, { name: args.name, description: args.description })).updated}`);
     case 'list_members':
       return json(await getOfficialClient().listChatMembers(args.chat_id, { pageSize: args.page_size, pageToken: args.page_token }));
-    case 'add_members': {
-      const r = await getOfficialClient().addChatMembers(args.chat_id, args.user_ids);
-      return text(r.invalidIds.length ? `Added (invalid IDs: ${r.invalidIds.join(', ')})` : 'Members added');
-    }
-    case 'remove_members': {
-      const r = await getOfficialClient().removeChatMembers(args.chat_id, args.user_ids);
-      return text(r.invalidIds.length ? `Removed (invalid IDs: ${r.invalidIds.join(', ')})` : 'Members removed');
+    case 'manage_members': {
+      const official = getOfficialClient();
+      if (args.action === 'remove') {
+        return json(await official.removeChatMembers(args.chat_id, args.member_ids));
+      }
+      return json(await official.addChatMembers(args.chat_id, args.member_ids));
     }
 
     // --- Official API: Doc Block Editing ---
@@ -1470,6 +1378,16 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().getBitableRecord(args.app_token, args.table_id, args.record_id));
     case 'delete_bitable_table':
       return text(`Table deleted: ${(await getOfficialClient().deleteBitableTable(args.app_token, args.table_id)).deleted}`);
+    case 'get_bitable_meta':
+      return json(await getOfficialClient().getBitableMeta(args.app_token));
+    case 'update_bitable_table':
+      return text(`Table renamed: ${(await getOfficialClient().updateBitableTable(args.app_token, args.table_id, args.name)).name}`);
+    case 'create_bitable_view':
+      return json(await getOfficialClient().createBitableView(args.app_token, args.table_id, args.view_name, args.view_type));
+    case 'delete_bitable_view':
+      return text(`View deleted: ${(await getOfficialClient().deleteBitableView(args.app_token, args.table_id, args.view_id)).deleted}`);
+    case 'copy_bitable':
+      return json(await getOfficialClient().copyBitable(args.app_token, args.name, args.folder_id));
 
     // --- Official API: Drive File Operations ---
 
@@ -1480,52 +1398,21 @@ async function handleTool(name, args) {
     case 'delete_file':
       return text(`File deleted: task=${(await getOfficialClient().deleteFile(args.file_token, args.type)).taskId}`);
 
-    // --- Official API: Calendar ---
-
-    case 'list_calendars':
-      return json(await getOfficialClient().listCalendars());
-    case 'create_calendar_event': {
-      const event = { summary: args.summary, description: args.description || '' };
-      event.start_time = { timestamp: args.start_time };
-      event.end_time = { timestamp: args.end_time };
-      if (args.location) event.location = { name: args.location };
-      return json(await getOfficialClient().createCalendarEvent(args.calendar_id, event));
-    }
-    case 'list_calendar_events':
-      return json(await getOfficialClient().listCalendarEvents(args.calendar_id, {
-        startTime: args.start_time, endTime: args.end_time, pageSize: args.page_size,
-      }));
-    case 'delete_calendar_event':
-      return text(`Event deleted: ${(await getOfficialClient().deleteCalendarEvent(args.calendar_id, args.event_id)).deleted}`);
-    case 'get_freebusy':
-      return json(await getOfficialClient().getFreeBusy(args.user_ids, args.start_time, args.end_time));
-
-    // --- Official API: Tasks ---
-
-    case 'create_task': {
-      const task = { summary: args.summary };
-      if (args.description) task.description = args.description;
-      if (args.due) task.due = { timestamp: args.due };
-      return json(await getOfficialClient().createTask(task));
-    }
-    case 'get_task':
-      return json(await getOfficialClient().getTask(args.task_id));
-    case 'list_tasks':
-      return json(await getOfficialClient().listTasks({ pageSize: args.page_size, pageToken: args.page_token }));
-    case 'update_task': {
-      const task = {};
-      if (args.summary) task.summary = args.summary;
-      if (args.description) task.description = args.description;
-      if (args.due) task.due = { timestamp: args.due };
-      return json(await getOfficialClient().updateTask(args.task_id, task));
-    }
-    case 'complete_task':
-      return text(`Task completed: ${(await getOfficialClient().completeTask(args.task_id)).completed}`);
-
     default:
       return text(`Unknown tool: ${name}`);
   }
 }
+
+// --- Process-level error handlers ---
+// Prevent stray promise rejections or uncaught exceptions from killing the MCP server.
+process.on('uncaughtException', (err) => {
+  console.error('[feishu-user-plugin] Uncaught exception:', err.message);
+  console.error(err.stack);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[feishu-user-plugin] Unhandled rejection:', reason);
+});
 
 async function main() {
   const transport = new StdioServerTransport();

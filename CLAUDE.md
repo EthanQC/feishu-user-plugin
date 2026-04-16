@@ -6,7 +6,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories (76 tools)
+## Tool Categories (66 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
 - `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
@@ -25,9 +25,10 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `get_user_info` — User display name lookup (official API first, cookie cache fallback)
 - `get_login_status` — Check cookie, app, and UAT status
 
-### User OAuth UAT Tools (P2P chat reading)
+### User OAuth UAT Tools (P2P chat reading + user-identity creation)
 - `read_p2p_messages` — Read P2P (direct message) chat history. chat_id accepts both numeric IDs (from create_p2p_chat) and oc_xxx format. Returns newest messages first by default.
 - `list_user_chats` — List group chats the user is in. Note: API only returns groups, not P2P. For P2P, use: `search_contacts` → `create_p2p_chat` → `read_p2p_messages`.
+- `create_doc` / `create_bitable` / `create_folder` — **UAT-first**: creates resources as the user (not the app) when UAT with write scopes is available. Falls back to app token.
 
 ### Official API Tools (app credentials)
 - `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, oc_ ID, or numeric ID; auto-resolves via bot's group list → im.chat.search → search_contacts). **Auto-falls back to UAT for external groups the bot cannot access.** Returns newest messages first by default. Messages include sender names.
@@ -35,26 +36,22 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `reply_message` / `forward_message` — Message operations (as bot)
 - `delete_message` / `update_message` — Recall or edit bot's own messages
 - `add_reaction` / `delete_reaction` — Emoji reactions on messages
-- `pin_message` / `unpin_message` — Pin/unpin messages in chat
+- `pin_message` — Pin or unpin a message (pinned=true/false)
 - `create_group` / `update_group` — Create and manage group chats
-- `list_members` / `add_members` / `remove_members` — Group membership management
+- `list_members` / `manage_members` — Group membership (manage_members: action=add/remove)
 - `search_docs` / `read_doc` / `get_doc_blocks` / `create_doc` — Document operations
 - `create_doc_block` / `update_doc_block` / `delete_doc_blocks` — Document content editing (insert/update/delete blocks)
-- `create_bitable` — Create a new Bitable (multi-dimensional table) app
-- `list_bitable_tables` / `create_bitable_table` — Table management
+- `create_bitable` / `get_bitable_meta` / `copy_bitable` — Bitable app management (create, get info, copy)
+- `list_bitable_tables` / `create_bitable_table` / `update_bitable_table` / `delete_bitable_table` — Table management (CRUD + rename)
 - `list_bitable_fields` / `create_bitable_field` / `update_bitable_field` / `delete_bitable_field` — Field (column) management
-- `list_bitable_views` — List views in a table
-- `search_bitable_records` — Query records with filter/sort
-- `create_bitable_record` / `update_bitable_record` / `delete_bitable_record` — Single record CRUD
-- `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` — Batch operations (max 500/call)
+- `list_bitable_views` / `create_bitable_view` / `delete_bitable_view` — View management (grid, kanban, gallery, form, gantt, calendar)
+- `search_bitable_records` / `get_bitable_record` — Query records
+- `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` — Record CRUD (single or batch, max 500/call)
 - `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` — Wiki
 - `list_files` / `create_folder` — Drive
 - `copy_file` / `move_file` / `delete_file` — Drive file operations (copy, move, delete)
 - `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
 - `find_user` — Contact lookup by email/mobile
-- `list_calendars` / `create_calendar_event` / `list_calendar_events` / `delete_calendar_event` — Calendar management
-- `get_freebusy` — Check user availability
-- `create_task` / `get_task` / `list_tasks` / `update_task` / `complete_task` — Task management
 
 ## Usage Patterns
 
@@ -73,29 +70,24 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 
 ### Bitable (Multi-dimensional Tables)
 - Create a bitable from scratch → `create_bitable` → `create_bitable_table` → `create_bitable_field`
+- Get bitable info → `get_bitable_meta`
+- Copy a bitable → `copy_bitable` with name and optional folder
 - Query data → `list_bitable_tables` → `list_bitable_fields` → `search_bitable_records`
-- Single record CRUD → `create_bitable_record` / `update_bitable_record` / `delete_bitable_record`
-- Bulk operations → `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` (max 500/call)
+- Rename table → `update_bitable_table` with new name
+- Read single record → `get_bitable_record`
+- Create/update/delete records → `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` (works for single or up to 500)
 - Manage fields → `create_bitable_field` / `update_bitable_field` (requires type param) / `delete_bitable_field`
+- Manage views → `create_bitable_view` (type: grid/kanban/gallery/form/gantt/calendar) / `delete_bitable_view`
 
 ### Group Management
 - Create a group → `create_group` with name and optional member open_ids
-- Add/remove members → `add_members` / `remove_members` with chat_id + user open_ids
+- Add/remove members → `manage_members` with chat_id + member_ids + action (add/remove)
 - List members → `list_members`
 
 ### Document Editing
 - Create doc with content → `create_doc` → `create_doc_block` (use document_id as parent_block_id for root)
 - Edit existing block → `get_doc_blocks` to find block_id → `update_doc_block`
 - Delete blocks → `delete_doc_blocks` with start/end index range
-
-### Calendar
-- View schedule → `list_calendars` → `list_calendar_events`
-- Create event → `create_calendar_event` with calendar_id, summary, start/end time
-- Check availability → `get_freebusy` with user open_ids and time range
-
-### Tasks
-- Create task → `create_task` with summary, optional description/due
-- Track tasks → `list_tasks` → `update_task` / `complete_task`
 
 ### Diagnostics
 - Diagnose issues → `get_login_status` first
@@ -237,10 +229,16 @@ Tell user to restart Claude Code. Only ONE restart should be needed.
 
 ## Troubleshooting Guide
 
+### If MCP disconnects mid-session
+- **Root cause** (fixed in v1.3.1): `@larksuiteoapi/node-sdk`'s `defaultLogger.error` uses `console.log` (stdout). MCP protocol uses stdout for JSON-RPC, so SDK error logs corrupt the transport and cause immediate disconnect.
+- **Fix**: Custom logger redirects all SDK output to stderr. Already applied in `src/official.js`.
+- If still happening: check for any `console.log` calls in server code (only `console.error` is safe in MCP servers).
+
 ### If MCP tools are not available
 1. Check `~/.claude.json` — config must be in **top-level** `mcpServers`, not inside `projects[*]`
-2. Restart Claude Code after config changes
-3. After restart, tools may take a few seconds to register — if first call fails with "No such tool", wait and retry once
+2. For Codex: check `~/.codex/config.toml` has `[mcp_servers.feishu-user-plugin]` section
+3. Restart Claude Code / Codex after config changes
+4. After restart, tools may take a few seconds to register — if first call fails with "No such tool", wait and retry once
 
 ### If cookie authentication fails
 - `document.cookie` in browser console CANNOT access HttpOnly cookies (`session`, `sl_session`)
@@ -282,9 +280,17 @@ Tell user to restart Claude Code. Only ONE restart should be needed.
 - **team-skills plugin**: Skills + CLAUDE.md only (no .mcp.json). For internal team members.
 
 ### Config management
-- `src/config.js`: Unified config module. Discovers config in `~/.claude.json` (top-level + project-level) and `.mcp.json`.
-- `setup` always writes to `~/.claude.json` top-level `mcpServers` (global).
-- `persistToConfig()` finds the correct config entry and writes back (used by heartbeat + UAT refresh).
+- `src/config.js`: Unified config module. Discovers config in `~/.claude.json` (top-level + project-level), `.mcp.json`, and `~/.codex/config.toml`.
+- `setup` writes to `~/.claude.json` (default) or `~/.codex/config.toml` (with `--client codex`), or both (`--client both`).
+- `persistToConfig()` finds the correct config entry and writes back atomically (used by heartbeat + UAT refresh).
+- All config writes use atomic write (tmp file + rename) to prevent race conditions with Claude Code.
+
+### Multi-client support
+- **Claude Code**: JSON config in `~/.claude.json` mcpServers
+- **Codex**: TOML config in `~/.codex/config.toml` mcp_servers
+- Setup: `npx feishu-user-plugin setup --client codex` or `--client both`
+- MCP server code is identical for both clients — only config format differs
+- Codex does not support Claude Code slash commands (skills) — only MCP tools are available
 
 ## Development & Publishing
 
@@ -367,10 +373,20 @@ cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/
 - `chore:` dependencies, CI, config changes
 
 ### Publishing
-1. Update `version` in `package.json`
-2. `git add <files> && git commit -m "v1.x.x: description"`
-3. `git tag v1.x.x && git push && git push --tags`
-4. GitHub Actions auto-publishes to npm. Users get the new version on next Claude Code restart.
+**IMPORTANT: Version number must ALWAYS be confirmed with the user before publishing.**
+Any operation involving `npm version`, modifying `package.json` version, `git tag v*`, or `git push --tags` requires explicit user confirmation of the target version number. Do not auto-decide version numbers.
+
+Three-layer version safety:
+1. **Claude rule** (this section): Ask user to confirm version before any publish-related operation
+2. **Local gate** (`prepublishOnly`): Interactive confirmation when running `npm publish` locally (skipped in CI)
+3. **CI gate** (`.github/workflows/publish.yml`): Tag must match `package.json` version or publish fails
+
+Steps:
+1. Confirm target version with user
+2. Update `version` in `package.json`
+3. `git add <files> && git commit -m "v1.x.x: description"`
+4. `git tag v1.x.x && git push && git push --tags`
+5. GitHub Actions verifies tag matches package.json, then auto-publishes to npm
 
 ### Syncing to team-skills (after any CLAUDE.md or skills change)
 1. Copy CLAUDE.md to skill reference: `cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md`

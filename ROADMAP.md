@@ -40,6 +40,14 @@
 - [x] 日历管理 (`list_calendars`, `create_calendar_event`, `list_calendar_events`, `delete_calendar_event`, `get_freebusy`)
 - [x] 任务管理 (`create_task`, `get_task`, `list_tasks`, `update_task`, `complete_task`)
 
+### v1.3.x — 稳定性 + Codex + 发布安全 + Bitable 补全
+- [x] fix: Lark SDK logger 重定向到 stderr（MCP 断连根因修复）
+- [x] fix: 进程级 uncaughtException / unhandledRejection 兜底
+- [x] fix: persistToConfig 原子写入（防 Claude Code 读写竞态）
+- [x] feat: Codex TOML 配置支持（setup --client codex/both）
+- [x] feat: 发布三层版本确认（Claude 规则 + prepublishOnly + CI tag 校验）
+- [x] feat: get_bitable_meta / copy_bitable / update_bitable_table / create_bitable_view / delete_bitable_view
+
 ## v1.4 — 计划中
 
 ### WebSocket 实时事件（核心方向）

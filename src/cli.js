@@ -41,23 +41,28 @@ function printHelp() {
 feishu-user-plugin — All-in-one Feishu MCP Server
 
 Commands:
-  (default)   Start MCP server (used by Claude Code)
+  (default)   Start MCP server (used by Claude Code / Codex)
   setup       Interactive setup wizard — writes MCP config
   oauth       Run OAuth flow to obtain user_access_token
   status      Check authentication status
   keepalive   Refresh cookie + UAT to prevent expiration (for cron jobs)
   help        Show this help
 
-Quick Start (team members):
+Setup options:
+  --app-id <id>       App ID (non-interactive mode)
+  --app-secret <s>    App Secret (non-interactive mode)
+  --cookie <c>        Cookie string (optional)
+  --client <target>   Config target: claude (default), codex, or both
+
+Quick Start (Claude Code):
   1. npx feishu-user-plugin setup
   2. Follow the prompts to configure credentials
   3. Restart Claude Code
 
-Quick Start (external users):
-  1. Create a Feishu app at https://open.feishu.cn/app
-  2. npx feishu-user-plugin setup
-  3. npx feishu-user-plugin oauth
-  4. Restart Claude Code
+Quick Start (Codex):
+  1. npx feishu-user-plugin setup --client codex
+  2. Follow the prompts to configure credentials
+  3. Restart Codex
 
 Auto-renewal (optional):
   Add to crontab to keep tokens alive even when Claude Code is closed:
