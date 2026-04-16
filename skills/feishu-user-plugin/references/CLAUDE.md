@@ -315,10 +315,9 @@ NPM_TOKEN is stored as a GitHub repo secret.
 team-skills 推送规范:
 1. **创建 feature branch**: `git checkout -b fix/feishu-xxx` 或 `sync/feishu-v1.x.x`
 2. **提交变更并推送 branch**: `git push -u origin <branch-name>`
-3. **创建 PR**: `gh pr create --title "..." --body "..."`
-4. **等 CI 通过**: validate workflow 会检查三方版本一致性（plugin.json == SKILL.md == README.md changelog）
-5. **等 CODEOWNERS review**: feishu-user-plugin 目录的 CODEOWNER 会被自动 request review
-6. **合并后删除 branch**
+3. **创建 PR 并设置 auto-merge**: `gh pr create --title "..." --body "..."` 然后 `gh pr merge <number> --auto --merge`
+4. **CI 通过后自动合并**: validate workflow 检查三方版本一致性,通过即自动 merge,无需手动操作
+5. **如 CI 失败**: 修复后 push 到同一 branch,CI 会重跑,通过后自动合并
 
 三方版本一致性规则:
 - `plugins/feishu-user-plugin/.claude-plugin/plugin.json` 的 `version`
