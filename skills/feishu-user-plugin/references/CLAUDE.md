@@ -310,12 +310,30 @@ NPM_TOKEN is stored as a GitHub repo secret.
 
 ### Syncing to team-skills
 
-After publishing, sync plugin assets to team-skills:
+**IMPORTANT: team-skills 仓库禁止直接推送 main。所有变更必须走 PR。**
 
+team-skills 推送规范:
+1. **创建 feature branch**: `git checkout -b fix/feishu-xxx` 或 `sync/feishu-v1.x.x`
+2. **提交变更并推送 branch**: `git push -u origin <branch-name>`
+3. **创建 PR**: `gh pr create --title "..." --body "..."`
+4. **等 CI 通过**: validate workflow 会检查三方版本一致性（plugin.json == SKILL.md == README.md changelog）
+5. **等 CODEOWNERS review**: feishu-user-plugin 目录的 CODEOWNER 会被自动 request review
+6. **合并后删除 branch**
+
+三方版本一致性规则:
+- `plugins/feishu-user-plugin/.claude-plugin/plugin.json` 的 `version`
+- `plugins/feishu-user-plugin/skills/feishu-user-plugin/SKILL.md` frontmatter 的 `version`
+- `plugins/feishu-user-plugin/README.md` 更新日志里第一个 `### vX.Y.Z` 标题
+- 这三个版本号必须相同,否则 CI 会失败。每次 npm 发包后,team-skills 的版本号也要同步更新。
+
+同步内容（每次发版后执行）:
 ```bash
-# From the feishu-user-plugin repo:
-cp -r skills/ /path/to/team-skills/plugins/feishu-user-plugin/skills/
-cp .claude-plugin/plugin.json /path/to/team-skills/plugins/feishu-user-plugin/.claude-plugin/
+# 1. 同步 skills + plugin.json
+cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md
+cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/
+cp .claude-plugin/plugin.json /Users/abble/team-skills/plugins/feishu-user-plugin/.claude-plugin/
+# 2. 手动更新 team-skills 的 README.md（工具数、更新日志）和 SKILL.md（version + allowed-tools）
+# 3. 走 PR 流程推送
 # Do NOT copy .mcp.json — team-skills plugin should not have one
 ```
 
@@ -340,11 +358,12 @@ When making ANY code change (new tools, bug fixes, features), update ALL of thes
 
 **同步命令（每次发版后执行）：**
 ```bash
-# 1. 同步 skills
+# 1. 同步 skills + plugin.json
 cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md
 cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/
-# 2. 手动更新 team-skills README（工具数、功能列表、更新日志）
-# 3. 提交并推送两个仓库
+cp .claude-plugin/plugin.json /Users/abble/team-skills/plugins/feishu-user-plugin/.claude-plugin/
+# 2. 手动更新 team-skills README（工具数、功能列表、更新日志）+ SKILL.md（version + allowed-tools）
+# 3. 走 PR 流程推送 team-skills（禁止直接推 main）
 ```
 
 ### Keeping ROADMAP.md up to date
@@ -392,7 +411,8 @@ Steps:
 1. Copy CLAUDE.md to skill reference: `cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md`
 2. Sync to team-skills repo: `cp -r skills/ /Users/abble/team-skills/plugins/feishu-user-plugin/skills/`
 3. Also sync plugin.json: `cp .claude-plugin/plugin.json /Users/abble/team-skills/plugins/feishu-user-plugin/.claude-plugin/`
-4. Commit and push both repos
+4. Update SKILL.md version + allowed-tools, README.md changelog + tool count
+5. **走 PR 流程**（创建 branch → push → PR → 等 CI 通过 → merge），禁止直接推 main
 
 ### Testing a tool
 - For Official API tools: can test directly via MCP tool call or standalone script using `readCredentials()` from `src/config.js`
