@@ -1,7 +1,7 @@
 {
   "name": "feishu-user-plugin",
-  "version": "1.2.0",
-  "description": "All-in-one Feishu plugin for Claude Code — send messages as yourself, read chats, manage docs/tables/wiki. 33 tools + 9 skills, 3 auth layers.",
+  "version": "1.3.2",
+  "description": "All-in-one Feishu plugin for Claude Code — send messages as yourself (incl. real @-mentions), read chats, manage docs/tables/wiki. 66 tools + 9 skills, 3 auth layers.",
   "author": {
     "name": "EthanQC"
   },

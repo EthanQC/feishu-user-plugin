@@ -144,12 +144,17 @@ const TOOLS = [
   // ========== User Identity — Send Messages ==========
   {
     name: 'send_as_user',
-    description: '[User Identity] Send a text message as the logged-in Feishu user. Supports reply threading.',
+    description: '[User Identity] Send a text message as the logged-in Feishu user. Supports reply threading and real @-mentions (triggers push notifications).',
     inputSchema: {
       type: 'object',
       properties: {
         chat_id: { type: 'string', description: 'Target chat ID (numeric)' },
-        text: { type: 'string', description: 'Message text' },
+        text: { type: 'string', description: 'Message text. If `ats` is provided, include the display marker for each @ in this text (default marker is `@<name>`).' },
+        ats: {
+          type: 'array',
+          description: 'Optional @-mentions. Each entry: {userId: "ou_xxx", name: "DisplayName"}. The text must contain each @<name> marker in order — it gets spliced into a real AT element so the mentioned user receives a notification.',
+          items: { type: 'object', properties: { userId: { type: 'string' }, name: { type: 'string' }, marker: { type: 'string' } } },
+        },
         root_id: { type: 'string', description: 'Thread root message ID (for reply, optional)' },
         parent_id: { type: 'string', description: 'Parent message ID (for nested reply, optional)' },
       },
@@ -164,6 +169,11 @@ const TOOLS = [
       properties: {
         user_name: { type: 'string', description: 'Recipient name (Chinese or English)' },
         text: { type: 'string', description: 'Message text' },
+        ats: {
+          type: 'array',
+          description: 'Optional @-mentions. Same format as send_as_user.ats: [{userId, name}]. Text must contain the `@<name>` marker for each entry.',
+          items: { type: 'object', properties: { userId: { type: 'string' }, name: { type: 'string' }, marker: { type: 'string' } } },
+        },
       },
       required: ['user_name', 'text'],
     },
@@ -176,6 +186,11 @@ const TOOLS = [
       properties: {
         group_name: { type: 'string', description: 'Group chat name' },
         text: { type: 'string', description: 'Message text' },
+        ats: {
+          type: 'array',
+          description: 'Optional @-mentions that trigger real notifications. Each entry: {userId, name}. Text must contain `@<name>` marker for each entry.',
+          items: { type: 'object', properties: { userId: { type: 'string' }, name: { type: 'string' }, marker: { type: 'string' } } },
+        },
       },
       required: ['group_name', 'text'],
     },
@@ -222,7 +237,7 @@ const TOOLS = [
   },
   {
     name: 'send_post_as_user',
-    description: '[User Identity] Send a rich text (POST) message with title and formatted paragraphs.',
+    description: '[User Identity] Send a rich text (POST) message with title and formatted paragraphs. Supports real @-mentions that trigger notifications.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -230,7 +245,7 @@ const TOOLS = [
         title: { type: 'string', description: 'Post title (optional)' },
         paragraphs: {
           type: 'array',
-          description: 'Array of paragraphs. Each paragraph is an array of elements: {tag:"text",text:"..."} or {tag:"a",href:"...",text:"..."} or {tag:"at",userId:"..."}',
+          description: 'Array of paragraphs. Each paragraph is an array of elements:\n• {tag:"text",text:"..."} — plain text\n• {tag:"a",href:"https://...",text:"display"} — hyperlink\n• {tag:"at",userId:"ou_xxx",name:"Display Name"} — real @-mention (triggers notification)',
           items: { type: 'array', items: { type: 'object' } },
         },
         root_id: { type: 'string', description: 'Thread root message ID (optional)' },
@@ -674,13 +689,13 @@ const TOOLS = [
   // ========== IM — Bot Send / Edit / Delete ==========
   {
     name: 'send_message_as_bot',
-    description: '[Official API] Send a message as the bot to any chat. Supports text, post, interactive, etc.',
+    description: '[Official API] Send a message as the bot to any chat. Supports text, post, interactive, etc. This is the reliable path for @-mentions: include `<at user_id="ou_xxx">Name</at>` inline in text content and Feishu resolves it to a real @-notification.',
     inputSchema: {
       type: 'object',
       properties: {
         chat_id: { type: 'string', description: 'Target chat_id (oc_xxx) or open_id' },
         msg_type: { type: 'string', description: 'Message type: text, post, image, interactive, etc.', enum: ['text', 'post', 'image', 'interactive', 'share_chat', 'share_user', 'audio', 'media', 'file', 'sticker'] },
-        content: { description: 'Message content (string or object, auto-serialized). For text: {"text":"hello"}' },
+        content: { description: 'Message content (string or object, auto-serialized). Plain text: {"text":"hello"}. Text with @-mention: {"text":"<at user_id=\\"ou_xxx\\">Alice</at> hi"} — the inline tag becomes a real @-notification.' },
       },
       required: ['chat_id', 'msg_type', 'content'],
     },
@@ -1008,7 +1023,7 @@ async function handleTool(name, args) {
 
     case 'send_as_user': {
       const c = await getUserClient();
-      const r = await c.sendMessage(args.chat_id, args.text, { rootId: args.root_id, parentId: args.parent_id });
+      const r = await c.sendMessage(args.chat_id, args.text, { rootId: args.root_id, parentId: args.parent_id, ats: args.ats });
       return sendResult(r, `Text sent as user to ${args.chat_id}`);
     }
     case 'send_to_user': {
@@ -1023,7 +1038,7 @@ async function handleTool(name, args) {
       const user = users[0];
       const chatId = await c.createChat(user.id);
       if (!chatId) return text(`Failed to create chat with ${user.title}`);
-      const r = await c.sendMessage(chatId, args.text);
+      const r = await c.sendMessage(chatId, args.text, { ats: args.ats });
       return sendResult(r, `Text sent to ${user.title} (chat: ${chatId})`);
     }
     case 'send_to_group': {
@@ -1036,7 +1051,7 @@ async function handleTool(name, args) {
         return text(`Multiple groups match "${args.group_name}":\n${candidates}\nUse search_contacts to find the exact group, then send_as_user with the ID.`);
       }
       const group = groups[0];
-      const r = await c.sendMessage(group.id, args.text);
+      const r = await c.sendMessage(group.id, args.text, { ats: args.ats });
       return sendResult(r, `Text sent to group "${group.title}" (${group.id})`);
     }
 
@@ -1222,31 +1237,17 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().getDocBlocks(args.document_id));
     case 'create_doc': {
       const official = getOfficialClient();
-      if (official.hasUAT) {
-        try {
-          const result = await official.createDocAsUser(args.title, args.folder_id);
-          return text(`Document created (as user): ${result.documentId}`);
-        } catch (e) {
-          console.error(`[feishu-user-plugin] UAT createDoc failed, falling back to app: ${e.message}`);
-        }
-      }
-      return text(`Document created: ${(await official.createDoc(args.title, args.folder_id)).documentId}`);
+      const ownership = official.hasUAT ? ' (as user)' : '';
+      return text(`Document created${ownership}: ${(await official.createDoc(args.title, args.folder_id)).documentId}`);
     }
 
     // --- Official API: Bitable ---
 
     case 'create_bitable': {
       const official = getOfficialClient();
-      if (official.hasUAT) {
-        try {
-          const r = await official.createBitableAsUser(args.name, args.folder_id);
-          return text(`Bitable created (as user): ${r.appToken}\nURL: ${r.url || ''}`);
-        } catch (e) {
-          console.error(`[feishu-user-plugin] UAT createBitable failed, falling back to app: ${e.message}`);
-        }
-      }
+      const ownership = official.hasUAT ? ' (as user)' : '';
       const r = await official.createBitable(args.name, args.folder_id);
-      return text(`Bitable created: ${r.appToken}\nURL: ${r.url || ''}`);
+      return text(`Bitable created${ownership}: ${r.appToken}\nURL: ${r.url || ''}`);
     }
     case 'list_bitable_tables':
       return json(await getOfficialClient().listBitableTables(args.app_token));
@@ -1298,14 +1299,8 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().listFiles(args.folder_token));
     case 'create_folder': {
       const official = getOfficialClient();
-      if (official.hasUAT) {
-        try {
-          return text(`Folder created (as user): ${(await official.createFolderAsUser(args.name, args.parent_token)).token}`);
-        } catch (e) {
-          console.error(`[feishu-user-plugin] UAT createFolder failed, falling back to app: ${e.message}`);
-        }
-      }
-      return text(`Folder created: ${(await official.createFolder(args.name, args.parent_token)).token}`);
+      const ownership = official.hasUAT ? ' (as user)' : '';
+      return text(`Folder created${ownership}: ${(await official.createFolder(args.name, args.parent_token)).token}`);
     }
 
     // --- Official API: Contact ---

@@ -101,6 +101,37 @@ class LarkOfficialClient {
     return data;
   }
 
+  // Generic UAT REST helper. Returns parsed JSON ({code, msg, data}).
+  async _uatREST(method, path, { body, query } = {}) {
+    const qs = query ? '?' + new URLSearchParams(query).toString() : '';
+    const url = 'https://open.feishu.cn' + path + qs;
+    return this._withUAT(async (uat) => {
+      const headers = { 'Authorization': `Bearer ${uat}` };
+      const init = { method, headers };
+      if (body !== undefined) {
+        headers['content-type'] = 'application/json';
+        init.body = JSON.stringify(body);
+      }
+      const res = await fetch(url, init);
+      return res.json();
+    });
+  }
+
+  // Try UAT first (for resources likely owned by the user), fall back to app SDK on failure.
+  // Returns SDK-shaped {code, msg, data}. Both paths yield the same shape.
+  async _asUserOrApp({ uatPath, method = 'GET', body, query, sdkFn, label }) {
+    if (this.hasUAT) {
+      try {
+        const data = await this._uatREST(method, uatPath, { body, query });
+        if (data.code === 0) return data;
+        console.error(`[feishu-user-plugin] ${label} as user failed (${data.code}: ${data.msg}), retrying as app`);
+      } catch (err) {
+        console.error(`[feishu-user-plugin] ${label} as user threw (${err.message}), retrying as app`);
+      }
+    }
+    return this._safeSDKCall(sdkFn, label);
+  }
+
   async listChatsAsUser({ pageSize = 20, pageToken } = {}) {
     const params = new URLSearchParams({ page_size: String(pageSize) });
     if (pageToken) params.set('page_token', pageToken);
@@ -371,61 +402,77 @@ class LarkOfficialClient {
   }
 
   async readDoc(documentId) {
-    const res = await this._safeSDKCall(
-      () => this.client.docx.document.rawContent({ path: { document_id: documentId }, params: { lang: 0 } }),
-      'readDoc'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/raw_content`,
+      query: { lang: '0' },
+      sdkFn: () => this.client.docx.document.rawContent({ path: { document_id: documentId }, params: { lang: 0 } }),
+      label: 'readDoc',
+    });
     return { content: res.data.content };
   }
 
   async createDoc(title, folderId) {
-    const res = await this._safeSDKCall(
-      () => this.client.docx.document.create({ data: { title, folder_token: folderId || '' } }),
-      'createDoc'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents`,
+      method: 'POST',
+      body: { title, folder_token: folderId || '' },
+      sdkFn: () => this.client.docx.document.create({ data: { title, folder_token: folderId || '' } }),
+      label: 'createDoc',
+    });
     return { documentId: res.data.document?.document_id };
   }
 
   async getDocBlocks(documentId) {
-    const res = await this._safeSDKCall(
-      () => this.client.docx.documentBlock.list({ path: { document_id: documentId }, params: { page_size: 500 } }),
-      'getDocBlocks'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks`,
+      query: { page_size: '500' },
+      sdkFn: () => this.client.docx.documentBlock.list({ path: { document_id: documentId }, params: { page_size: 500 } }),
+      label: 'getDocBlocks',
+    });
     return { items: res.data.items || [] };
   }
 
   async createDocBlock(documentId, parentBlockId, children, index) {
     const data = { children };
     if (index !== undefined) data.index = index;
-    const res = await this._safeSDKCall(
-      () => this.client.docx.documentBlockChildren.create({
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${parentBlockId}/children`,
+      method: 'POST',
+      body: data,
+      sdkFn: () => this.client.docx.documentBlockChildren.create({
         path: { document_id: documentId, block_id: parentBlockId },
         data,
       }),
-      'createDocBlock'
-    );
+      label: 'createDocBlock',
+    });
     return { blocks: res.data.children || [] };
   }
 
   async updateDocBlock(documentId, blockId, updateBody) {
-    const res = await this._safeSDKCall(
-      () => this.client.docx.documentBlock.patch({
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${blockId}`,
+      method: 'PATCH',
+      body: updateBody,
+      sdkFn: () => this.client.docx.documentBlock.patch({
         path: { document_id: documentId, block_id: blockId },
         data: updateBody,
       }),
-      'updateDocBlock'
-    );
+      label: 'updateDocBlock',
+    });
     return { block: res.data.block };
   }
 
   async deleteDocBlocks(documentId, parentBlockId, startIndex, endIndex) {
-    const res = await this._safeSDKCall(
-      () => this.client.docx.documentBlockChildren.batchDelete({
+    await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${parentBlockId}/children/batch_delete`,
+      method: 'DELETE',
+      body: { start_index: startIndex, end_index: endIndex },
+      sdkFn: () => this.client.docx.documentBlockChildren.batchDelete({
         path: { document_id: documentId, block_id: parentBlockId },
         data: { start_index: startIndex, end_index: endIndex },
       }),
-      'deleteDocBlocks'
-    );
+      label: 'deleteDocBlocks',
+    });
     return { deleted: true };
   }
 
@@ -445,15 +492,22 @@ class LarkOfficialClient {
     const data = {};
     if (name) data.name = name;
     if (folderId) data.folder_token = folderId;
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.app.create({ data }),
-      'createBitable'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps`,
+      method: 'POST',
+      body: data,
+      sdkFn: () => this.client.bitable.app.create({ data }),
+      label: 'createBitable',
+    });
     return { appToken: res.data.app?.app_token, name: res.data.app?.name, url: res.data.app?.url };
   }
 
   async listBitableTables(appToken) {
-    const res = await this._safeSDKCall(() => this.client.bitable.appTable.list({ path: { app_token: appToken } }), 'listTables');
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables`,
+      sdkFn: () => this.client.bitable.appTable.list({ path: { app_token: appToken } }),
+      label: 'listTables',
+    });
     return { items: res.data.items || [] };
   }
 
@@ -461,39 +515,54 @@ class LarkOfficialClient {
     const data = { table: { name } };
     if (fields && fields.length > 0) data.table.default_view_name = name;
     if (fields && fields.length > 0) data.table.fields = fields;
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTable.create({ path: { app_token: appToken }, data }),
-      'createTable'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables`,
+      method: 'POST',
+      body: data,
+      sdkFn: () => this.client.bitable.appTable.create({ path: { app_token: appToken }, data }),
+      label: 'createTable',
+    });
     return { tableId: res.data.table_id };
   }
 
   async listBitableFields(appToken, tableId) {
-    const res = await this._safeSDKCall(() => this.client.bitable.appTableField.list({ path: { app_token: appToken, table_id: tableId } }), 'listFields');
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields`,
+      sdkFn: () => this.client.bitable.appTableField.list({ path: { app_token: appToken, table_id: tableId } }),
+      label: 'listFields',
+    });
     return { items: res.data.items || [] };
   }
 
   async createBitableField(appToken, tableId, fieldConfig) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableField.create({ path: { app_token: appToken, table_id: tableId }, data: fieldConfig }),
-      'createField'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields`,
+      method: 'POST',
+      body: fieldConfig,
+      sdkFn: () => this.client.bitable.appTableField.create({ path: { app_token: appToken, table_id: tableId }, data: fieldConfig }),
+      label: 'createField',
+    });
     return { field: res.data.field };
   }
 
   async updateBitableField(appToken, tableId, fieldId, fieldConfig) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableField.update({ path: { app_token: appToken, table_id: tableId, field_id: fieldId }, data: fieldConfig }),
-      'updateField'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`,
+      method: 'PUT',
+      body: fieldConfig,
+      sdkFn: () => this.client.bitable.appTableField.update({ path: { app_token: appToken, table_id: tableId, field_id: fieldId }, data: fieldConfig }),
+      label: 'updateField',
+    });
     return { field: res.data.field };
   }
 
   async deleteBitableField(appToken, tableId, fieldId) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableField.delete({ path: { app_token: appToken, table_id: tableId, field_id: fieldId } }),
-      'deleteField'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/fields/${fieldId}`,
+      method: 'DELETE',
+      sdkFn: () => this.client.bitable.appTableField.delete({ path: { app_token: appToken, table_id: tableId, field_id: fieldId } }),
+      label: 'deleteField',
+    });
     return { fieldId: res.data.field_id, deleted: res.data.deleted };
   }
 
@@ -501,126 +570,169 @@ class LarkOfficialClient {
     const data = {};
     if (filter) data.filter = filter;
     if (sort) data.sort = sort;
-    if (pageSize) data.page_size = pageSize;
-    if (pageToken) data.page_token = pageToken;
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.search({ path: { app_token: appToken, table_id: tableId }, data }),
-      'searchRecords'
-    );
+    const query = {};
+    if (pageSize) query.page_size = String(pageSize);
+    if (pageToken) query.page_token = pageToken;
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/search`,
+      method: 'POST',
+      body: data,
+      query,
+      sdkFn: () => this.client.bitable.appTableRecord.search({
+        path: { app_token: appToken, table_id: tableId },
+        params: { page_size: pageSize, ...(pageToken ? { page_token: pageToken } : {}) },
+        data,
+      }),
+      label: 'searchRecords',
+    });
     return { items: res.data.items || [], total: res.data.total, hasMore: res.data.has_more };
   }
 
   async createBitableRecord(appToken, tableId, fields) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.create({ path: { app_token: appToken, table_id: tableId }, data: { fields } }),
-      'createRecord'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records`,
+      method: 'POST',
+      body: { fields },
+      sdkFn: () => this.client.bitable.appTableRecord.create({ path: { app_token: appToken, table_id: tableId }, data: { fields } }),
+      label: 'createRecord',
+    });
     return { recordId: res.data.record?.record_id };
   }
 
   async updateBitableRecord(appToken, tableId, recordId, fields) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.update({ path: { app_token: appToken, table_id: tableId, record_id: recordId }, data: { fields } }),
-      'updateRecord'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`,
+      method: 'PUT',
+      body: { fields },
+      sdkFn: () => this.client.bitable.appTableRecord.update({ path: { app_token: appToken, table_id: tableId, record_id: recordId }, data: { fields } }),
+      label: 'updateRecord',
+    });
     return { recordId: res.data.record?.record_id };
   }
 
   async deleteBitableRecord(appToken, tableId, recordId) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.delete({ path: { app_token: appToken, table_id: tableId, record_id: recordId } }),
-      'deleteRecord'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`,
+      method: 'DELETE',
+      sdkFn: () => this.client.bitable.appTableRecord.delete({ path: { app_token: appToken, table_id: tableId, record_id: recordId } }),
+      label: 'deleteRecord',
+    });
     return { deleted: res.data.deleted };
   }
 
   async batchCreateBitableRecords(appToken, tableId, records) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.batchCreate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
-      'batchCreateRecords'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_create`,
+      method: 'POST',
+      body: { records },
+      sdkFn: () => this.client.bitable.appTableRecord.batchCreate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
+      label: 'batchCreateRecords',
+    });
     return { records: res.data.records || [] };
   }
 
   async batchUpdateBitableRecords(appToken, tableId, records) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.batchUpdate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
-      'batchUpdateRecords'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_update`,
+      method: 'POST',
+      body: { records },
+      sdkFn: () => this.client.bitable.appTableRecord.batchUpdate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
+      label: 'batchUpdateRecords',
+    });
     return { records: res.data.records || [] };
   }
 
   async batchDeleteBitableRecords(appToken, tableId, recordIds) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.batchDelete({ path: { app_token: appToken, table_id: tableId }, data: { records: recordIds } }),
-      'batchDeleteRecords'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/batch_delete`,
+      method: 'POST',
+      body: { records: recordIds },
+      sdkFn: () => this.client.bitable.appTableRecord.batchDelete({ path: { app_token: appToken, table_id: tableId }, data: { records: recordIds } }),
+      label: 'batchDeleteRecords',
+    });
     return { records: res.data.records || [] };
   }
 
   async listBitableViews(appToken, tableId) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableView.list({ path: { app_token: appToken, table_id: tableId }, params: { page_size: 50 } }),
-      'listViews'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/views`,
+      query: { page_size: '50' },
+      sdkFn: () => this.client.bitable.appTableView.list({ path: { app_token: appToken, table_id: tableId }, params: { page_size: 50 } }),
+      label: 'listViews',
+    });
     return { items: res.data.items || [] };
   }
 
   async getBitableRecord(appToken, tableId, recordId) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableRecord.get({ path: { app_token: appToken, table_id: tableId, record_id: recordId } }),
-      'getRecord'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/records/${recordId}`,
+      sdkFn: () => this.client.bitable.appTableRecord.get({ path: { app_token: appToken, table_id: tableId, record_id: recordId } }),
+      label: 'getRecord',
+    });
     return { record: res.data.record };
   }
 
   async deleteBitableTable(appToken, tableId) {
-    await this._safeSDKCall(
-      () => this.client.bitable.appTable.delete({ path: { app_token: appToken, table_id: tableId } }),
-      'deleteTable'
-    );
+    await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}`,
+      method: 'DELETE',
+      sdkFn: () => this.client.bitable.appTable.delete({ path: { app_token: appToken, table_id: tableId } }),
+      label: 'deleteTable',
+    });
     return { deleted: true };
   }
 
   async getBitableMeta(appToken) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.app.get({ path: { app_token: appToken } }),
-      'getBitableMeta'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}`,
+      sdkFn: () => this.client.bitable.app.get({ path: { app_token: appToken } }),
+      label: 'getBitableMeta',
+    });
     return { app: res.data.app };
   }
 
   async updateBitableTable(appToken, tableId, name) {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTable.patch({ path: { app_token: appToken, table_id: tableId }, data: { name } }),
-      'updateTable'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}`,
+      method: 'PATCH',
+      body: { name },
+      sdkFn: () => this.client.bitable.appTable.patch({ path: { app_token: appToken, table_id: tableId }, data: { name } }),
+      label: 'updateTable',
+    });
     return { name: res.data.name };
   }
 
   async createBitableView(appToken, tableId, viewName, viewType = 'grid') {
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.appTableView.create({ path: { app_token: appToken, table_id: tableId }, data: { view_name: viewName, view_type: viewType } }),
-      'createView'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/views`,
+      method: 'POST',
+      body: { view_name: viewName, view_type: viewType },
+      sdkFn: () => this.client.bitable.appTableView.create({ path: { app_token: appToken, table_id: tableId }, data: { view_name: viewName, view_type: viewType } }),
+      label: 'createView',
+    });
     return { view: res.data.view };
   }
 
   async deleteBitableView(appToken, tableId, viewId) {
-    await this._safeSDKCall(
-      () => this.client.bitable.appTableView.delete({ path: { app_token: appToken, table_id: tableId, view_id: viewId } }),
-      'deleteView'
-    );
+    await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/tables/${tableId}/views/${viewId}`,
+      method: 'DELETE',
+      sdkFn: () => this.client.bitable.appTableView.delete({ path: { app_token: appToken, table_id: tableId, view_id: viewId } }),
+      label: 'deleteView',
+    });
     return { deleted: true };
   }
 
   async copyBitable(appToken, name, folderId) {
     const data = { name };
     if (folderId) data.folder_token = folderId;
-    const res = await this._safeSDKCall(
-      () => this.client.bitable.app.copy({ path: { app_token: appToken }, data }),
-      'copyBitable'
-    );
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/bitable/v1/apps/${appToken}/copy`,
+      method: 'POST',
+      body: data,
+      sdkFn: () => this.client.bitable.app.copy({ path: { app_token: appToken }, data }),
+      label: 'copyBitable',
+    });
     return { app: res.data.app };
   }
 
@@ -665,10 +777,14 @@ class LarkOfficialClient {
   }
 
   async createFolder(name, parentToken) {
-    const res = await this._safeSDKCall(
-      () => this.client.drive.file.createFolder({ data: { name, folder_token: parentToken || '' } }),
-      'createFolder'
-    );
+    const body = { name, folder_token: parentToken || '' };
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/drive/v1/files/create_folder`,
+      method: 'POST',
+      body,
+      sdkFn: () => this.client.drive.file.createFolder({ data: body }),
+      label: 'createFolder',
+    });
     return { token: res.data.token };
   }
 
@@ -729,53 +845,6 @@ class LarkOfficialClient {
       hasMore = res.data.has_more && !!pageToken;
     }
     return allChats;
-  }
-
-  // --- UAT-based creation (resources owned by user, not app) ---
-
-  async createDocAsUser(title, folderId) {
-    const data = { title };
-    if (folderId) data.folder_token = folderId;
-    const result = await this._withUAT(async (uat) => {
-      const res = await fetch('https://open.feishu.cn/open-apis/docx/v1/documents', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${uat}`, 'content-type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    });
-    if (result.code !== 0) throw new Error(`createDocAsUser failed (${result.code}): ${result.msg}`);
-    return { documentId: result.data.document?.document_id };
-  }
-
-  async createBitableAsUser(name, folderId) {
-    const data = {};
-    if (name) data.name = name;
-    if (folderId) data.folder_token = folderId;
-    const result = await this._withUAT(async (uat) => {
-      const res = await fetch('https://open.feishu.cn/open-apis/bitable/v1/apps', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${uat}`, 'content-type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    });
-    if (result.code !== 0) throw new Error(`createBitableAsUser failed (${result.code}): ${result.msg}`);
-    return { appToken: result.data.app?.app_token, name: result.data.app?.name, url: result.data.app?.url };
-  }
-
-  async createFolderAsUser(name, parentToken) {
-    const data = { name, folder_token: parentToken || '' };
-    const result = await this._withUAT(async (uat) => {
-      const res = await fetch('https://open.feishu.cn/open-apis/drive/v1/files/create_folder', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${uat}`, 'content-type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      return res.json();
-    });
-    if (result.code !== 0) throw new Error(`createFolderAsUser failed (${result.code}): ${result.msg}`);
-    return { token: result.data.token };
   }
 
   // --- Safe SDK Call (extracts real Feishu error from AxiosError) ---
@@ -863,7 +932,7 @@ class LarkOfficialClient {
     if (!m) return null;
     let body = m.body?.content || '';
     try { body = JSON.parse(body); } catch {}
-    return {
+    const out = {
       messageId: m.message_id,
       chatId: m.chat_id,
       senderId: m.sender?.id,
@@ -873,6 +942,8 @@ class LarkOfficialClient {
       createTime: this._normalizeTimestamp(m.create_time),
       updateTime: this._normalizeTimestamp(m.update_time),
     };
+    if (Array.isArray(m.mentions) && m.mentions.length > 0) out.mentions = m.mentions;
+    return out;
   }
 
   _normalizeTimestamp(ts) {

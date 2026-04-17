@@ -14,7 +14,8 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `send_as_user` — Send text to any chat by ID, supports reply threading (root_id/parent_id)
 - `send_image_as_user` — Send image (requires image_key from `upload_image`)
 - `send_file_as_user` — Send file (requires file_key from `upload_file`)
-- `send_post_as_user` — Send rich text with title + formatted paragraphs
+- `send_post_as_user` — Send rich text with title + formatted paragraphs. Elements: `{tag:"text"}`, `{tag:"a",href,text}`, `{tag:"at",userId,name}`. **@-mentions trigger real notifications** (fixed by registering AT element IDs in RichText.atIds field 6 — reverse-engineered from Feishu Web bundle's AtProperty + RichText schemas).
+- `send_as_user` / `send_to_user` / `send_to_group` — plain text sends now accept optional `ats: [{userId, name}]`; the text must contain the `@<name>` marker for each entry. The marker is spliced into a real AT element so the mentioned user is notified. Identity is the cookie user (not bot).
 - `send_sticker_as_user` — Send sticker/emoji
 - `send_audio_as_user` — Send audio message
 
@@ -28,7 +29,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 ### User OAuth UAT Tools (P2P chat reading + user-identity creation)
 - `read_p2p_messages` — Read P2P (direct message) chat history. chat_id accepts both numeric IDs (from create_p2p_chat) and oc_xxx format. Returns newest messages first by default.
 - `list_user_chats` — List group chats the user is in. Note: API only returns groups, not P2P. For P2P, use: `search_contacts` → `create_p2p_chat` → `read_p2p_messages`.
-- `create_doc` / `create_bitable` / `create_folder` — **UAT-first**: creates resources as the user (not the app) when UAT with write scopes is available. Falls back to app token.
+- **All docx + bitable + drive create/read/write tools are UAT-first**: when UAT is configured, every operation (create/edit/delete doc blocks, bitable tables/fields/views/records, drive folders) tries the user's token first and falls back to app token on failure. This keeps resources consistently owned by the user and avoids 403 errors when the app can't access user-created resources. Read-only tools (e.g. `read_doc`, `get_doc_blocks`, `list_bitable_tables`) are also UAT-first so user-owned resources remain readable.
 
 ### Official API Tools (app credentials)
 - `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, oc_ ID, or numeric ID; auto-resolves via bot's group list → im.chat.search → search_contacts). **Auto-falls back to UAT for external groups the bot cannot access.** Returns newest messages first by default. Messages include sender names.
@@ -59,7 +60,9 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - Send text as yourself → `send_to_user` or `send_to_group`
 - Send image → `upload_image` → `send_image_as_user`
 - Send file → `upload_file` → `send_file_as_user`
-- Send rich content → `send_post_as_user` (formatted text with links, @mentions)
+- Send rich content → `send_post_as_user` (formatted text + links + real @-mentions via `{tag:"at",userId,name}`)
+- Send text with @-mentions (plain text) → `send_as_user` / `send_to_user` / `send_to_group` with `ats:[{userId,name}]` + text containing `@<name>` markers
+- Bot-identity @-mention alternative → `send_message_as_bot` with `<at user_id="ou_xxx">Name</at>` inline in content text
 - Reply as user in thread → `send_as_user` with root_id
 - Reply as bot → `reply_message` (official API)
 

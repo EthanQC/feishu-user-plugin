@@ -140,6 +140,19 @@ message RichText {
   repeated string elementIds = 1;
   optional string innerText = 2;
   optional RichTextElements elements = 3;
+  // Index fields: each "*Ids" is a list of elemIds (pointing into the dictionary)
+  // that the server needs to register as special-type elements. Discovered from
+  // Feishu Web bundle — atIds=6 is what makes @-mentions actually notify.
+  repeated string imageIds = 5;
+  repeated string atIds = 6;
+  repeated string anchorIds = 7;
+  repeated string i18nIds = 8;
+  repeated string mediaIds = 9;
+  repeated string docsIds = 10;
+  repeated string interactiveIds = 11;
+  repeated string mentionIds = 12;
+  optional int32 version = 13;
+  repeated string atUserGroupIds = 14;
 }
 
 message RichTextElements {
@@ -165,6 +178,20 @@ message RichTextElement {
 
 message TextProperty {
   optional string content = 1;
+}
+
+// For AT (@-mention) elements. Both fields are required in the real schema;
+// `content` is marked deprecated but still required on the wire.
+message AtProperty {
+  optional string userId = 1;
+  optional string content = 2;
+}
+
+// For A (hyperlink) elements.
+message AnchorProperty {
+  optional string href = 1;
+  optional string content = 2;
+  optional string textContent = 3;
 }
 
 // --- Chat Operations ---

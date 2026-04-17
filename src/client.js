@@ -200,14 +200,65 @@ class LarkUserClient {
 
   // --- Send Text Message ---
 
+  // Supports inline @mentions via the `ats` param:
+  //   ats: [{ userId: 'ou_xxx', name: 'Alice' }]
+  // The text should contain the mention markers (defaults to `@Alice` substrings,
+  // matched in order). If `text` already contains the @Name substrings, they're
+  // found in order and spliced into rich-text AT elements.
   async sendMessage(chatId, text, opts = {}) {
-    const elemId = generateCid();
-    const textPropBuf = this._encode('TextProperty', { content: text });
+    const { ats } = opts;
+    if (!Array.isArray(ats) || ats.length === 0) {
+      // Fast path: plain text, single TEXT element.
+      const elemId = generateCid();
+      const textPropBuf = this._encode('TextProperty', { content: text });
+      return this._sendMsg(MsgType.TEXT, chatId, {
+        richText: {
+          elementIds: [elemId],
+          innerText: text,
+          elements: { dictionary: { [elemId]: { tag: 1, property: textPropBuf } } },
+        },
+      }, opts);
+    }
+
+    // Build rich-text segments: split `text` by each at's display marker and
+    // weave AT elements in between text elements. Each `ats[i]` is consumed
+    // in order from the remaining text.
+    const elementIds = [];
+    const atIds = [];
+    const dictionary = {};
+    let remaining = text;
+    for (const at of ats) {
+      if (!at.userId) throw new Error('sendMessage: each at entry requires userId');
+      const display = at.marker || (at.name ? '@' + at.name : '@' + at.userId);
+      const idx = remaining.indexOf(display);
+      if (idx === -1) throw new Error(`sendMessage: marker "${display}" not found in text`);
+      const before = remaining.slice(0, idx);
+      if (before) {
+        const id = generateCid();
+        elementIds.push(id);
+        dictionary[id] = { tag: 1, property: this._encode('TextProperty', { content: before }) };
+      }
+      const atId = generateCid();
+      elementIds.push(atId);
+      atIds.push(atId);
+      dictionary[atId] = {
+        tag: 5,
+        property: this._encode('AtProperty', { userId: at.userId, content: display }),
+      };
+      remaining = remaining.slice(idx + display.length);
+    }
+    if (remaining) {
+      const id = generateCid();
+      elementIds.push(id);
+      dictionary[id] = { tag: 1, property: this._encode('TextProperty', { content: remaining }) };
+    }
+
     return this._sendMsg(MsgType.TEXT, chatId, {
       richText: {
-        elementIds: [elemId],
+        elementIds,
         innerText: text,
-        elements: { dictionary: { [elemId]: { tag: 1, property: textPropBuf } } },
+        elements: { dictionary },
+        atIds,
       },
     }, opts);
   }
@@ -240,26 +291,43 @@ class LarkUserClient {
 
   async sendPost(chatId, title, paragraphs, opts = {}) {
     const elementIds = [];
+    const atIds = [];
+    const anchorIds = [];
     const dictionary = {};
+    const paraTexts = [];
 
     for (let i = 0; i < paragraphs.length; i++) {
       const para = paragraphs[i];
+      const paraTextParts = [];
       for (const elem of para) {
         const elemId = generateCid();
         elementIds.push(elemId);
 
         if (elem.tag === 'text') {
-          const propBuf = this._encode('TextProperty', { content: elem.text });
+          const t = elem.text || '';
+          const propBuf = this._encode('TextProperty', { content: t });
           dictionary[elemId] = { tag: 1, property: propBuf };
+          paraTextParts.push(t);
         } else if (elem.tag === 'at') {
-          const propBuf = this._encode('TextProperty', { content: elem.userId });
+          if (!elem.userId) throw new Error('sendPost: {tag:"at"} requires userId');
+          const displayName = elem.name || elem.userName || elem.text || elem.userId;
+          const display = displayName.startsWith('@') ? displayName : `@${displayName}`;
+          const propBuf = this._encode('AtProperty', { userId: elem.userId, content: display });
           dictionary[elemId] = { tag: 5, property: propBuf };
+          atIds.push(elemId);
+          paraTextParts.push(display);
         } else if (elem.tag === 'a') {
-          // Link element: content stores the URL, display text goes through innerText
-          const propBuf = this._encode('TextProperty', { content: elem.href || elem.text || '' });
+          const href = elem.href || '';
+          const label = elem.text || href;
+          const propBuf = this._encode('AnchorProperty', { href, content: label, textContent: label });
           dictionary[elemId] = { tag: 6, property: propBuf };
+          anchorIds.push(elemId);
+          paraTextParts.push(label);
+        } else {
+          throw new Error(`sendPost: unknown element tag "${elem.tag}" (supported: text, at, a)`);
         }
       }
+      paraTexts.push(paraTextParts.join(''));
       // Insert newline element between paragraphs
       if (i < paragraphs.length - 1) {
         const nlId = generateCid();
@@ -269,10 +337,13 @@ class LarkUserClient {
       }
     }
 
-    const innerText = paragraphs.map(p => p.map(e => e.text || '').join('')).join('\n');
+    const innerText = paraTexts.join('\n');
+    const richText = { elementIds, innerText, elements: { dictionary } };
+    if (atIds.length > 0) richText.atIds = atIds;
+    if (anchorIds.length > 0) richText.anchorIds = anchorIds;
     return this._sendMsg(MsgType.POST, chatId, {
       title: title || '',
-      richText: { elementIds, innerText, elements: { dictionary } },
+      richText,
     }, opts);
   }
 
