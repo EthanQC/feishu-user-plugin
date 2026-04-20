@@ -426,17 +426,50 @@ Steps:
 ### Release announcement rules (every release)
 After a successful publish, draft a group announcement to "AI技术解决（内部）" (chat_id `7599552782038813643`) and ALWAYS show it to the user for review first. Only send after explicit approval.
 
-Format: Feishu rich-text post (`send_post_as_user`) so @-mentions create real push notifications.
+**Transport**: `send_post_as_user` (rich-text post). No @-mentions — announcements are impersonal broadcasts. No emojis. No marketing language.
 
-The announcement should:
-1. **Lead with who it fixes for**: `@` the specific affected team members by name when the release addresses a complaint they raised (known open_ids: 洪梓皓 `ou_5006cdca960b8c7bf554c916912041e0`, 刘彦君 `ou_4e9c205249c3c92d9aa8e6ea34b7df7f`, 周宇 `ou_2f7d738c08c56be05d1790493d1aff34`, 麦宏博 `ou_6d1057b5a11d600e131508f36afcf38e`). Mentioning them surgically per-topic (not blanket) keeps notifications relevant.
-2. **State root cause + fix in plain language**, not feature names. Non-technical members are the majority (per 周宇: 95% of the team is non-technical).
-3. **Group fixes by severity** (🔴 critical / 🟡 user-visible / 🟢 quality) + **✨ for new features**. Skip sections that don't apply to the release.
-4. **Close with the upgrade path**: `npx` users just restart Claude Code; team-skills users `git pull`. State the new tool count if it changed.
-5. **Link to CHANGELOG**: `https://github.com/EthanQC/feishu-user-plugin/blob/main/CHANGELOG.md`
-6. **Length**: one screen of Feishu mobile is ideal — ~300–500 Chinese chars. Cut anything that doesn't make someone's life easier.
+**Structure** (in this order; omit a section if it doesn't apply this release):
 
-Do NOT invent attributions. Only @ someone if the chat history shows they actually reported the specific bug this release fixes. Read the group's recent messages first (`read_messages` with chat_id above) to ground the announcement in real complaints.
+```
+feishu-user-plugin vX.Y.Z 发布
+
+<一到两句开篇总结本次发布的主题，陈述语气，不推销>
+
+修复
+• <缺陷描述>：<根因与修复机制，引用具体错误码/接口名/参数>
+• ...
+
+新增
+• 新增 <tool 名> 工具：<一句话功能描述>。<关键约束或调用条件>
+• ...
+
+调整
+• <行为变化的描述>
+• ...
+
+下版本计划
+• <条目>
+• ...
+
+升级方式
+• 重启 Claude Code / Codex 即可自动拉取 X.Y.Z
+• <若有相关新日志/错误提示，说明怎么应对>
+• 建议复测 N 个场景：<场景 1>、<场景 2>、<场景 3>
+```
+
+**写作规范**:
+- **开篇**：一到两句陈述式总结，不宣传、不夸大。参考 v1.3.2："本次更新主要补齐了 X 能力，并修复了 Y 问题；同时将 Z 统一调整为 ..."
+- **每条 bullet**：先写用户可见现象，再写底层机制。引用具体错误码（如 1770032 / 91403）、接口名（如 create_doc_block）、参数名（如 RichText.atIds）——专业读者信赖的是细节
+- **字符**：bullet 用 `•`（U+2022），不用 `-` 或 `*`；代码/工具名在正文中直接写，不加反引号
+- **禁用**：emoji、🔴🟡🟢 之类严重度标记、`@` 任何人、营销词（"强大"、"全新"、"重磅"）、夸张修辞
+- **语气**：技术 release note 的中性语气，像写给同行的内部更新。参考 v1.3.2 全文
+- **长度**：单屏为宜，一般 400–700 汉字。每条 bullet 一到三行
+- **下版本计划**：复制自上一版公告仍未完成的条目 + 本次发布中暴露的新方向。本版已完成的条目必须删除
+- **升级方式**：至少包含重启指令；若本次修了某类错误（如 APP_ID 校验），列出对应诊断日志字样；以"建议复测 N 个场景"收尾，场景要具体可操作
+
+**结尾**：不加 CHANGELOG 链接（v1.3.2 风格未含链接，群内读者不需要）。
+
+**发送前**：始终先用 `send_to_user` 或类似工具发给用户自己审核，或直接以文本形式贴在对话里等用户批准。用户说"发"才调 `send_post_as_user` 到目标群。
 
 ### Syncing to team-skills (after any CLAUDE.md or skills change)
 1. Copy CLAUDE.md to skill reference: `cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md`
