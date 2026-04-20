@@ -421,6 +421,22 @@ Steps:
 3. `git add <files> && git commit -m "v1.x.x: description"`
 4. `git tag v1.x.x && git push && git push --tags`
 5. GitHub Actions verifies tag matches package.json, then auto-publishes to npm
+6. **After npm confirms the new version is live, draft a release announcement in Chinese for the "AI技术解决（内部）" Feishu group and show it to the user for approval BEFORE sending.** Do not send until the user explicitly approves.
+
+### Release announcement rules (every release)
+After a successful publish, draft a group announcement to "AI技术解决（内部）" (chat_id `7599552782038813643`) and ALWAYS show it to the user for review first. Only send after explicit approval.
+
+Format: Feishu rich-text post (`send_post_as_user`) so @-mentions create real push notifications.
+
+The announcement should:
+1. **Lead with who it fixes for**: `@` the specific affected team members by name when the release addresses a complaint they raised (known open_ids: 洪梓皓 `ou_5006cdca960b8c7bf554c916912041e0`, 刘彦君 `ou_4e9c205249c3c92d9aa8e6ea34b7df7f`, 周宇 `ou_2f7d738c08c56be05d1790493d1aff34`, 麦宏博 `ou_6d1057b5a11d600e131508f36afcf38e`). Mentioning them surgically per-topic (not blanket) keeps notifications relevant.
+2. **State root cause + fix in plain language**, not feature names. Non-technical members are the majority (per 周宇: 95% of the team is non-technical).
+3. **Group fixes by severity** (🔴 critical / 🟡 user-visible / 🟢 quality) + **✨ for new features**. Skip sections that don't apply to the release.
+4. **Close with the upgrade path**: `npx` users just restart Claude Code; team-skills users `git pull`. State the new tool count if it changed.
+5. **Link to CHANGELOG**: `https://github.com/EthanQC/feishu-user-plugin/blob/main/CHANGELOG.md`
+6. **Length**: one screen of Feishu mobile is ideal — ~300–500 Chinese chars. Cut anything that doesn't make someone's life easier.
+
+Do NOT invent attributions. Only @ someone if the chat history shows they actually reported the specific bug this release fixes. Read the group's recent messages first (`read_messages` with chat_id above) to ground the announcement in real complaints.
 
 ### Syncing to team-skills (after any CLAUDE.md or skills change)
 1. Copy CLAUDE.md to skill reference: `cp CLAUDE.md skills/feishu-user-plugin/references/CLAUDE.md`
