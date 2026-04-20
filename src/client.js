@@ -1,6 +1,6 @@
 const path = require('path');
 const protobuf = require('protobufjs');
-const { generateRequestId, generateCid, parseCookie, formatCookie } = require('./utils');
+const { generateRequestId, generateCid, parseCookie, formatCookie, fetchWithTimeout } = require('./utils');
 
 const GATEWAY_URL = 'https://internal-api-lark-api.feishu.cn/im/gateway/';
 const CSRF_URL = 'https://internal-api-lark-api.feishu.cn/accounts/csrf';
@@ -47,7 +47,7 @@ class LarkUserClient {
   // --- Auth ---
 
   async _getCsrfToken() {
-    const res = await fetch(`${CSRF_URL}?_t=${Date.now()}`, {
+    const res = await fetchWithTimeout(`${CSRF_URL}?_t=${Date.now()}`, {
       method: 'POST',
       headers: {
         ...this._jsonHeaders(),
@@ -68,7 +68,7 @@ class LarkUserClient {
   }
 
   async _getUserInfo() {
-    const res = await fetch(`${USER_INFO_URL}?app_id=12&_t=${Date.now()}`, {
+    const res = await fetchWithTimeout(`${USER_INFO_URL}?app_id=12&_t=${Date.now()}`, {
       headers: {
         ...this._jsonHeaders(),
         'x-csrf-token': this.csrfToken || '',
@@ -179,7 +179,7 @@ class LarkUserClient {
       cid: generateRequestId(),
       payload: reqBuf,
     });
-    const res = await fetch(GATEWAY_URL, {
+    const res = await fetchWithTimeout(GATEWAY_URL, {
       method: 'POST',
       headers: this._protoHeaders(cmd, cmdVersion),
       body: packetBuf,

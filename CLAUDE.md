@@ -6,7 +6,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories (66 tools)
+## Tool Categories (67 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
 - `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
@@ -52,6 +52,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `list_files` / `create_folder` — Drive
 - `copy_file` / `move_file` / `delete_file` — Drive file operations (copy, move, delete)
 - `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
+- `download_image` — Download an image from a message (needs message_id + image_key from read_messages) and return it as MCP image content so the model can **see the pixels**, not just the key. Tries UAT first, falls back to app token (app path requires the bot to be in the chat).
 - `find_user` — Contact lookup by email/mobile
 
 ## Usage Patterns
@@ -233,9 +234,21 @@ Tell user to restart Claude Code. Only ONE restart should be needed.
 ## Troubleshooting Guide
 
 ### If MCP disconnects mid-session
-- **Root cause** (fixed in v1.3.1): `@larksuiteoapi/node-sdk`'s `defaultLogger.error` uses `console.log` (stdout). MCP protocol uses stdout for JSON-RPC, so SDK error logs corrupt the transport and cause immediate disconnect.
-- **Fix**: Custom logger redirects all SDK output to stderr. Already applied in `src/official.js`.
-- If still happening: check for any `console.log` calls in server code (only `console.error` is safe in MCP servers).
+Two known root causes, both fixed in v1.3.3:
+
+1. **stdout pollution** (partial fix in v1.3.1, fully closed in v1.3.3):
+   - `@larksuiteoapi/node-sdk`'s `defaultLogger.error` uses `console.log` (stdout). MCP uses stdout for JSON-RPC, so any stray write corrupts the transport and disconnects the client.
+   - v1.3.1 replaced the SDK's logger. v1.3.3 also globally redirects `console.log` / `console.info` → `console.error` at the top of `src/index.js` as defense-in-depth against ANY future dependency leaking to stdout.
+
+2. **unbounded fetch hangs** (fixed in v1.3.3):
+   - All raw `fetch` calls to `feishu.cn` / `internal-api-lark-api.feishu.cn` used to have no timeout. A stalled connection (ECONNRESET, slow DNS, upstream hang) would block a tool handler indefinitely; the MCP client times out the request, which some clients handle by tearing down the stdio transport — observed as "mid-session disconnect".
+   - Fix: `utils.js::fetchWithTimeout` with `AbortController`, 30s default. All `client.js` + `official.js` fetches go through it.
+   - If still happening: check for any `console.log` calls in server code (only `console.error` is safe), and grep for raw `await fetch(` — every one must go through `fetchWithTimeout`.
+
+### If Official API tools return 401 / "token invalid" every time
+- **Likely cause**: `LARK_APP_ID` is wrong or stale. Observed in production: Claude Code auto-installed the plugin and guessed/copied a wrong APP_ID that doesn't match the team's real app (e.g. from an unrelated app, from someone else's machine, or hallucinated).
+- **Diagnosis**: `get_login_status` now reports `App credentials: INVALID — app_id=<x> rejected by Feishu (<code>: <msg>)`. MCP startup logs `[feishu-user-plugin] ERROR: LARK_APP_ID=<x> was REJECTED by Feishu` on stderr when this happens.
+- **Fix**: Re-run the canonical install prompt from `team-skills/plugins/feishu-user-plugin/README.md` which contains the correct APP_ID/SECRET, and restart Claude Code.
 
 ### If MCP tools are not available
 1. Check `~/.claude.json` — config must be in **top-level** `mcpServers`, not inside `projects[*]`

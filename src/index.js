@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+// MCP stdio protocol uses stdout for JSON-RPC. ANY accidental stdout write from
+// this process or its dependencies will corrupt the transport and disconnect the
+// client. v1.3.1 patched the Lark SDK's defaultLogger via a custom logger, but
+// that only covers one dependency. This global redirect is defense-in-depth:
+// any present or future module that calls console.log (or console.info) goes to
+// stderr instead, so MCP stdio stays clean no matter what.
+// Do this BEFORE any other require() so even early log calls are captured.
+console.log = (...args) => console.error(...args);
+console.info = (...args) => console.error(...args);
+
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const {
@@ -992,6 +1002,20 @@ const TOOLS = [
     },
   },
 
+  // ========== Message Resources (Image/File Download) ==========
+  {
+    name: 'download_image',
+    description: '[User Identity / Official API] Download an image embedded in a message so the model can actually see it. Pass the message_id and image_key returned by read_messages / read_p2p_messages. Tries user identity first (works for any chat the user sees), falls back to app identity (requires the bot to be in the same chat).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'The message_id (om_xxx) that contains the image — from read_messages / read_p2p_messages' },
+        image_key: { type: 'string', description: 'The image_key from the message content (img_xxx)' },
+      },
+      required: ['message_id', 'image_key'],
+    },
+  },
+
 ];
 
 // --- Server ---
@@ -1139,9 +1163,20 @@ async function handleTool(name, args) {
         parts.push(`  ${status.message}`);
       } catch (e) { parts.push(`Cookie: ${e.message}`); }
       const hasApp = !!(process.env.LARK_APP_ID && process.env.LARK_APP_SECRET);
-      parts.push(`App credentials: ${hasApp ? 'Configured' : 'Not set'}`);
-      const official = hasApp ? getOfficialClient() : null;
-      parts.push(`User access token: ${official?.hasUAT ? 'Configured (P2P reading enabled)' : 'Not set (optional — needed for P2P chat reading. Run OAuth flow to obtain, see README for details)'}`);
+      if (!hasApp) {
+        parts.push(`App credentials: Not set`);
+      } else {
+        const official = getOfficialClient();
+        const probe = await official.verifyApp();
+        if (probe.valid) {
+          const nameBit = probe.appName ? ` "${probe.appName}"` : '';
+          parts.push(`App credentials: Valid — app_id=${probe.appId}${nameBit}`);
+        } else {
+          parts.push(`App credentials: INVALID — app_id=${probe.appId} rejected by Feishu (${probe.error})`);
+          parts.push(`  → Likely wrong/stale APP_ID. Re-run the install prompt from team-skills/plugins/feishu-user-plugin/README.md to get the correct credentials.`);
+        }
+        parts.push(`User access token: ${official.hasUAT ? 'Configured (P2P reading enabled)' : 'Not set (optional — needed for P2P chat reading. Run OAuth flow to obtain, see README for details)'}`);
+      }
       return text(parts.join('\n'));
     }
 
@@ -1236,17 +1271,16 @@ async function handleTool(name, args) {
     case 'get_doc_blocks':
       return json(await getOfficialClient().getDocBlocks(args.document_id));
     case 'create_doc': {
-      const official = getOfficialClient();
-      const ownership = official.hasUAT ? ' (as user)' : '';
-      return text(`Document created${ownership}: ${(await official.createDoc(args.title, args.folder_id)).documentId}`);
+      const r = await getOfficialClient().createDoc(args.title, args.folder_id);
+      const ownership = r.viaUser ? ' (as user)' : ' (as app — UAT unavailable or failed; document owned by the app, not you)';
+      return text(`Document created${ownership}: ${r.documentId}`);
     }
 
     // --- Official API: Bitable ---
 
     case 'create_bitable': {
-      const official = getOfficialClient();
-      const ownership = official.hasUAT ? ' (as user)' : '';
-      const r = await official.createBitable(args.name, args.folder_id);
+      const r = await getOfficialClient().createBitable(args.name, args.folder_id);
+      const ownership = r.viaUser ? ' (as user)' : ' (as app — UAT unavailable or failed; bitable owned by the app, not you)';
       return text(`Bitable created${ownership}: ${r.appToken}\nURL: ${r.url || ''}`);
     }
     case 'list_bitable_tables':
@@ -1298,9 +1332,9 @@ async function handleTool(name, args) {
     case 'list_files':
       return json(await getOfficialClient().listFiles(args.folder_token));
     case 'create_folder': {
-      const official = getOfficialClient();
-      const ownership = official.hasUAT ? ' (as user)' : '';
-      return text(`Folder created${ownership}: ${(await official.createFolder(args.name, args.parent_token)).token}`);
+      const r = await getOfficialClient().createFolder(args.name, args.parent_token);
+      const ownership = r.viaUser ? ' (as user)' : ' (as app — UAT unavailable or failed; folder owned by the app, not you)';
+      return text(`Folder created${ownership}: ${r.token}`);
     }
 
     // --- Official API: Contact ---
@@ -1393,6 +1427,18 @@ async function handleTool(name, args) {
     case 'delete_file':
       return text(`File deleted: task=${(await getOfficialClient().deleteFile(args.file_token, args.type)).taskId}`);
 
+    case 'download_image': {
+      const r = await getOfficialClient().downloadMessageResource(args.message_id, args.image_key, 'image');
+      // Return as MCP image content so the model sees the pixels directly.
+      // Also include a tiny text preamble so the via-identity + size are visible in transcript.
+      return {
+        content: [
+          { type: 'text', text: `Image downloaded (${r.viaUser ? 'as user' : 'as app'}, ${r.bytes} bytes, ${r.mimeType}):` },
+          { type: 'image', data: r.base64, mimeType: r.mimeType },
+        ],
+      };
+    }
+
     default:
       return text(`Unknown tool: ${name}`);
   }
@@ -1422,6 +1468,27 @@ async function main() {
   if (!hasCookie) console.error('[feishu-user-plugin] WARNING: LARK_COOKIE not set — user identity tools (send_to_user, etc.) will fail');
   if (!hasApp) console.error('[feishu-user-plugin] WARNING: LARK_APP_ID/SECRET not set — official API tools (read_messages, docs, etc.) will fail');
   if (!hasUAT) console.error('[feishu-user-plugin] WARNING: LARK_USER_ACCESS_TOKEN not set — P2P chat reading (read_p2p_messages) will fail');
+
+  // Validate APP_ID/SECRET against Feishu before serving any tool calls.
+  // Catches the "Claude filled in a wrong/stale APP_ID during install" failure mode
+  // that otherwise surfaces as cryptic 401s on every Official API call (looks like
+  // "MCP 掉线" to the user). Non-blocking — we warn but still serve, because the
+  // user may only need user-identity (cookie) tools.
+  if (hasApp) {
+    try {
+      const probe = await getOfficialClient().verifyApp();
+      if (probe.valid) {
+        const nameBit = probe.appName ? ` "${probe.appName}"` : '';
+        console.error(`[feishu-user-plugin] App verified: ${probe.appId}${nameBit}`);
+      } else {
+        console.error(`[feishu-user-plugin] ERROR: LARK_APP_ID=${probe.appId} was REJECTED by Feishu (${probe.error}).`);
+        console.error('[feishu-user-plugin] → Every Official API tool call will fail. Likely wrong/stale APP_ID.');
+        console.error('[feishu-user-plugin] → Re-run the install prompt from team-skills/plugins/feishu-user-plugin/README.md to get the correct credentials.');
+      }
+    } catch (e) {
+      console.error(`[feishu-user-plugin] WARNING: Could not verify APP_ID (${e.message}); network issue or cold start. Proceeding anyway.`);
+    }
+  }
 }
 
 main().catch(console.error);

@@ -1,4 +1,5 @@
 const lark = require('@larksuiteoapi/node-sdk');
+const { fetchWithTimeout } = require('./utils');
 
 // Redirect all Lark SDK logs to stderr.
 // The SDK's defaultLogger.error uses console.log (stdout), which corrupts
@@ -39,6 +40,50 @@ class LarkOfficialClient {
     return !!this._uat;
   }
 
+  // Fetches (and caches) an app_access_token directly via the internal endpoint.
+  // Avoids relying on SDK-internal token-manager APIs that may change across versions.
+  async _getAppToken() {
+    const now = Math.floor(Date.now() / 1000);
+    if (this._appToken && this._appTokenExpires > now + 60) return this._appToken;
+    const res = await fetchWithTimeout('https://open.feishu.cn/open-apis/auth/v3/app_access_token/internal', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ app_id: this.appId, app_secret: this.appSecret }),
+      timeoutMs: 10000,
+    });
+    const data = await res.json();
+    if (data.code !== 0 || !data.app_access_token) {
+      throw new Error(`app_access_token failed: ${data.code}: ${data.msg || 'unknown'}`);
+    }
+    this._appToken = data.app_access_token;
+    this._appTokenExpires = now + (typeof data.expire === 'number' ? data.expire : 7200);
+    return this._appToken;
+  }
+
+  // Probe APP_ID/SECRET validity by requesting a tenant access token.
+  // Catches the common "user's Claude filled in a wrong/stale APP_ID" failure mode
+  // (observed in production: 周宇's machine ran with an APP_ID nobody recognized,
+  // causing all Official API calls to 401 with cryptic messages that looked like
+  // MCP "掉线" to the user). Returns { valid, appId, appName?, error? }.
+  async verifyApp() {
+    try {
+      const token = await this._getAppToken();
+      // Try to fetch app display name (best-effort; requires application scope)
+      let appName = null;
+      try {
+        const infoRes = await fetchWithTimeout(`https://open.feishu.cn/open-apis/application/v6/applications/${this.appId}?lang=zh_cn`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          timeoutMs: 10000,
+        });
+        const info = await infoRes.json();
+        if (info.code === 0) appName = info.data?.app?.app_name || null;
+      } catch (_) { /* name is best-effort; valid creds still matter most */ }
+      return { valid: true, appId: this.appId, appName };
+    } catch (e) {
+      return { valid: false, appId: this.appId, error: e.message };
+    }
+  }
+
   async _getValidUAT() {
     if (!this._uat) throw new Error('No user_access_token. Run: npx feishu-user-plugin oauth');
 
@@ -53,7 +98,7 @@ class LarkOfficialClient {
   async _refreshUAT() {
     if (!this._uatRefresh) throw new Error('UAT expired and no refresh token. Run: npx feishu-user-plugin oauth');
 
-    const res = await fetch('https://open.feishu.cn/open-apis/authen/v2/oauth/token', {
+    const res = await fetchWithTimeout('https://open.feishu.cn/open-apis/authen/v2/oauth/token', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -112,31 +157,38 @@ class LarkOfficialClient {
         headers['content-type'] = 'application/json';
         init.body = JSON.stringify(body);
       }
-      const res = await fetch(url, init);
+      const res = await fetchWithTimeout(url, init);
       return res.json();
     });
   }
 
   // Try UAT first (for resources likely owned by the user), fall back to app SDK on failure.
-  // Returns SDK-shaped {code, msg, data}. Both paths yield the same shape.
+  // Returns SDK-shaped {code, msg, data, _viaUser}. _viaUser is true iff the UAT call succeeded;
+  // callers can surface this to distinguish "created by user" vs "created by app" for resources
+  // whose ownership matters (docs, bitables, folders).
   async _asUserOrApp({ uatPath, method = 'GET', body, query, sdkFn, label }) {
     if (this.hasUAT) {
       try {
         const data = await this._uatREST(method, uatPath, { body, query });
-        if (data.code === 0) return data;
+        if (data.code === 0) {
+          data._viaUser = true;
+          return data;
+        }
         console.error(`[feishu-user-plugin] ${label} as user failed (${data.code}: ${data.msg}), retrying as app`);
       } catch (err) {
         console.error(`[feishu-user-plugin] ${label} as user threw (${err.message}), retrying as app`);
       }
     }
-    return this._safeSDKCall(sdkFn, label);
+    const appData = await this._safeSDKCall(sdkFn, label);
+    if (appData && typeof appData === 'object') appData._viaUser = false;
+    return appData;
   }
 
   async listChatsAsUser({ pageSize = 20, pageToken } = {}) {
     const params = new URLSearchParams({ page_size: String(pageSize) });
     if (pageToken) params.set('page_token', pageToken);
     const data = await this._withUAT(async (uat) => {
-      const res = await fetch(`https://open.feishu.cn/open-apis/im/v1/chats?${params}`, {
+      const res = await fetchWithTimeout(`https://open.feishu.cn/open-apis/im/v1/chats?${params}`, {
         headers: { 'Authorization': `Bearer ${uat}` },
       });
       return res.json();
@@ -158,7 +210,7 @@ class LarkOfficialClient {
     if (endTime) params.set('end_time', endTime);
     if (pageToken) params.set('page_token', pageToken);
     const data = await this._withUAT(async (uat) => {
-      const res = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?${params}`, {
+      const res = await fetchWithTimeout(`https://open.feishu.cn/open-apis/im/v1/messages?${params}`, {
         headers: { 'Authorization': `Bearer ${uat}` },
       });
       return res.json();
@@ -196,6 +248,57 @@ class LarkOfficialClient {
       'getMessage'
     );
     return this._formatMessage(res.data);
+  }
+
+  // Download a resource (image/file) attached to a message.
+  // Tries UAT first (works for any chat the user is in), falls back to app token
+  // (requires the bot to be in the same chat — Feishu restriction).
+  // resourceType: 'image' | 'file'. Returns { base64, mimeType, viaUser }.
+  async downloadMessageResource(messageId, fileKey, resourceType = 'image') {
+    const path = `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/resources/${encodeURIComponent(fileKey)}?type=${encodeURIComponent(resourceType)}`;
+    const url = 'https://open.feishu.cn' + path;
+
+    // Attempt 1: user identity
+    if (this.hasUAT) {
+      try {
+        const uat = await this._getValidUAT();
+        const res = await fetchWithTimeout(url, {
+          headers: { 'Authorization': `Bearer ${uat}` },
+          timeoutMs: 60000,
+        });
+        if (res.ok && !res.headers.get('content-type')?.includes('application/json')) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          return {
+            base64: buf.toString('base64'),
+            mimeType: res.headers.get('content-type') || 'application/octet-stream',
+            bytes: buf.length,
+            viaUser: true,
+          };
+        }
+        const errJson = await res.json().catch(() => null);
+        console.error(`[feishu-user-plugin] downloadMessageResource as user failed: ${errJson?.code}: ${errJson?.msg || res.statusText}, retrying as app`);
+      } catch (e) {
+        console.error(`[feishu-user-plugin] downloadMessageResource as user threw (${e.message}), retrying as app`);
+      }
+    }
+
+    // Attempt 2: app identity
+    const token = await this._getAppToken();
+    const res = await fetchWithTimeout(url, {
+      headers: { 'Authorization': `Bearer ${token}` },
+      timeoutMs: 60000,
+    });
+    if (!res.ok || res.headers.get('content-type')?.includes('application/json')) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(`downloadMessageResource failed: ${errJson?.code}: ${errJson?.msg || res.statusText}. Note: app identity requires the bot to be in the same chat.`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return {
+      base64: buf.toString('base64'),
+      mimeType: res.headers.get('content-type') || 'application/octet-stream',
+      bytes: buf.length,
+      viaUser: false,
+    };
   }
 
   async replyMessage(messageId, text, msgType = 'text') {
@@ -419,7 +522,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.docx.document.create({ data: { title, folder_token: folderId || '' } }),
       label: 'createDoc',
     });
-    return { documentId: res.data.document?.document_id };
+    return { documentId: res.data.document?.document_id, viaUser: !!res._viaUser };
   }
 
   async getDocBlocks(documentId) {
@@ -499,7 +602,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.app.create({ data }),
       label: 'createBitable',
     });
-    return { appToken: res.data.app?.app_token, name: res.data.app?.name, url: res.data.app?.url };
+    return { appToken: res.data.app?.app_token, name: res.data.app?.name, url: res.data.app?.url, viaUser: !!res._viaUser };
   }
 
   async listBitableTables(appToken) {
@@ -785,7 +888,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.drive.file.createFolder({ data: body }),
       label: 'createFolder',
     });
-    return { token: res.data.token };
+    return { token: res.data.token, viaUser: !!res._viaUser };
   }
 
   // --- Drive: File Operations ---

@@ -48,6 +48,14 @@
 - [x] feat: 发布三层版本确认（Claude 规则 + prepublishOnly + CI tag 校验）
 - [x] feat: get_bitable_meta / copy_bitable / update_bitable_table / create_bitable_view / delete_bitable_view
 
+### v1.3.3 — 掉线根治 + APP_ID 校验 + 图片读取
+- [x] fix: 全局 `console.log` / `console.info` 重定向到 stderr（防任何依赖意外污染 MCP stdio）
+- [x] fix: 所有 `fetch` 加 `AbortController` 超时（默认 30s），避免 Feishu API 卡住导致 MCP 客户端超时断链（这是 v1.3.2 仍偶发掉线的真因）
+- [x] fix: `create_doc` / `create_bitable` / `create_folder` 的 `(as user)` 标签现在按 UAT 调用是否真成功打标，不再仅看 `hasUAT`；UAT 失败时明确显示 `(as app — UAT unavailable or failed; X owned by the app, not you)`
+- [x] feat: 启动时探测 `LARK_APP_ID` / `LARK_APP_SECRET` 有效性，无效时在 stderr 报错并指向团队 README；非阻塞（用户可能只用 cookie 身份）
+- [x] feat: `get_login_status` 返回 APP_ID + 应用名，便于一眼看出配的是不是团队官方 app
+- [x] feat: `download_image` tool — 通过 message_id + image_key 下载消息里的图片，以 MCP image content 形式回传，模型能直接看到像素（不再只拿到 key 字符串）
+
 ## v1.4 — 计划中
 
 ### WebSocket 实时事件（核心方向）

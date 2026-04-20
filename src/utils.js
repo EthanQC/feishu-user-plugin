@@ -31,9 +31,22 @@ function formatCookie(cookieObj) {
     .join('; ');
 }
 
+// Wraps global fetch with an AbortController-based timeout. A stalled network
+// connection to feishu.cn can otherwise block an MCP tool handler indefinitely,
+// causing the client to time out and (in some clients) tear down the stdio
+// transport — observed as "MCP 中途掉线" by v1.3.2 users.
+// Default 30s; pass `timeoutMs` in init to override per-call.
+function fetchWithTimeout(url, init = {}) {
+  const { timeoutMs = 30000, ...rest } = init;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`fetch timeout after ${timeoutMs}ms: ${url}`)), timeoutMs);
+  return fetch(url, { ...rest, signal: rest.signal || controller.signal }).finally(() => clearTimeout(timer));
+}
+
 module.exports = {
   generateRequestId,
   generateCid,
   parseCookie,
   formatCookie,
+  fetchWithTimeout,
 };

@@ -3,10 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
-[![Tools](https://img.shields.io/badge/Tools-76-orange.svg)](#tools)
+[![Tools](https://img.shields.io/badge/Tools-67-orange.svg)](#tools)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**All-in-one Feishu/Lark MCP Server -- 76 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, and more.**
+**All-in-one Feishu/Lark MCP Server -- 67 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, and more.**
 
 The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API. Works with Claude Code, Cursor, Windsurf, OpenClaw, and any MCP-compatible client.
 
@@ -337,7 +337,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-## Tools (76 total)
+## Tools (67 total)
 
 ### User Identity -- Messaging (8 tools, cookie auth)
 
@@ -390,6 +390,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 | `add_members` | Add users to a group |
 | `remove_members` | Remove users from a group |
 | `upload_image` / `upload_file` | Upload image/file, returns key for sending |
+| `download_image` | Download an image from a message by message_id + image_key, returned as MCP image content so the model can see the pixels |
 
 ### Official API -- Documents (7 tools)
 
@@ -508,7 +509,7 @@ feishu-user-plugin/
 │       ├── SKILL.md         # Main skill definition (trigger, tools, auth)
 │       └── references/      # 8 skill reference docs + CLAUDE.md
 ├── src/
-│   ├── index.js             # MCP server entry point (76 tools)
+│   ├── index.js             # MCP server entry point (67 tools)
 │   ├── client.js            # User identity client (Protobuf gateway)
 │   ├── official.js          # Official API client (REST, UAT)
 │   ├── utils.js             # ID generators, cookie parser
