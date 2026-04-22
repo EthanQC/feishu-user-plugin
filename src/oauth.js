@@ -23,7 +23,12 @@ const PORT = 9997;
 const REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`;
 // offline_access is required to get refresh_token for auto-renewal
 // Write scopes (docx:document, drive:drive, bitable:app) allow creating resources as the user, not the app
-const SCOPES = 'offline_access auth:user.id:read im:message im:message:readonly im:chat im:chat:readonly contact:user.base:readonly contact:user.id:readonly docx:document drive:drive bitable:app wiki:wiki:readonly';
+// v1.3.4 additions:
+//   okr:*                                  for list_user_okrs / get_okrs / list_okr_periods
+//   calendar:*                             for list_calendars / list_calendar_events / get_calendar_event
+//   wiki:wiki                              write access for move_docs_to_wiki (attach docs/bitables to wiki)
+//   docs:document.media:(upload|download)  for docx image read/write
+const SCOPES = 'offline_access auth:user.id:read im:message im:message:readonly im:chat im:chat:readonly contact:user.base:readonly contact:user.id:readonly docx:document drive:drive bitable:app wiki:wiki:readonly wiki:wiki okr:okr:readonly okr:okr.period:readonly okr:okr.content:readonly calendar:calendar:readonly calendar:calendar.event:read docs:document.media:download docs:document.media:upload';
 
 if (!APP_ID || !APP_SECRET) {
   console.error('Missing LARK_APP_ID or LARK_APP_SECRET.');

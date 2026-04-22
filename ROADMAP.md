@@ -56,6 +56,29 @@
 - [x] feat: `get_login_status` 返回 APP_ID + 应用名，便于一眼看出配的是不是团队官方 app
 - [x] feat: `download_image` tool — 通过 message_id + image_key 下载消息里的图片，以 MCP image content 形式回传，模型能直接看到像素（不再只拿到 key 字符串）
 
+### v1.3.4 — Wiki 贯通 + 文档图片读写 + OKR + 日历 + 外部群降级硬化
+- [x] feat: 统一 ID resolver（`src/resolver.js`）— 所有 docx/bitable 工具的 id 参数透明接受原生 token / wiki node / Feishu URL，10 分钟 LRU 缓存
+- [x] feat: `get_wiki_node` 工具 — 单独暴露 wiki node → obj_token+obj_type 解析
+- [x] feat: `create_doc` / `create_bitable` 支持 `wiki_space_id`(+ `wiki_parent_node_token`) 直接挂进 Wiki，走 `move_docs_to_wiki`
+- [x] feat: `download_image` 新增 docx 图片模式（`doc_token` + `image_token`），走 `drive/v1/medias/<token>/download`
+- [x] feat: `create_doc_block` / `update_doc_block` 新增 `image_path` / `image_token` 快捷参数，内部完成"占位块 + media upload + replace_image patch"三步走
+- [x] feat: `src/doc-blocks.js` — docx block 构造器骨架，为 v1.3.5 本地 md 同步预留
+- [x] feat: OKR 读取 — `list_user_okrs` / `get_okrs` / `list_okr_periods`
+- [x] feat: 日历读取 — `list_calendars` / `list_calendar_events` / `get_calendar_event`
+- [x] fix: `read_messages` / `read_p2p_messages` 降级硬化 — 响应加 `via` + `via_reason` 字段；`src/error-codes.js` 按错误码路由（外部租户 / 权限 / 不在群 → UAT；频控 / 5xx / ECONNRESET → 退避 2s 重试再 UAT）；search_contacts 预判的外部群跳过 bot
+- [x] fix: 无 UAT 时不再直接抛 Feishu 原始 payload，改为指向 `npx feishu-user-plugin oauth` 的清晰错误信息
+- [x] fix: `_uatREST` 支持数组 query 参数（OKR `period_ids`、`okr_ids` 等需要重复 key）
+
+## v1.3.5 — 计划中
+
+### 本地 md → 飞书知识库同步（从 v1.3.4 拆出）
+- [ ] md parser 依赖选型（remark / markdown-it / unified）
+- [ ] `src/doc-blocks.js` 补齐 heading / bullet / ordered / code / quote / divider / table / todo / callout 构造器
+- [ ] wikilink `[[page]]` 解析：按 md 文件名 / 标题 / 用户自定义 mapping 三级策略
+- [ ] 图片内联：md `![alt](./img.png)` → 复用 v1.3.4 的 `uploadDocMedia` + `image_path` 快捷
+- [ ] CLI 子命令 `sync-md <path>` vs MCP 工具 `sync_markdown_to_wiki` 取舍
+- [ ] 增量 diff：已存在 wiki 节点的更新策略（全量覆盖 / 按 block_id 精细 diff）
+
 ## v1.4 — 计划中
 
 ### WebSocket 实时事件（核心方向）

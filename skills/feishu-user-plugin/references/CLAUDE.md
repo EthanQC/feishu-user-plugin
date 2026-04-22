@@ -6,7 +6,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories (67 tools)
+## Tool Categories (74 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
 - `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
@@ -48,14 +48,47 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `list_bitable_views` / `create_bitable_view` / `delete_bitable_view` — View management (grid, kanban, gallery, form, gantt, calendar)
 - `search_bitable_records` / `get_bitable_record` — Query records
 - `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` — Record CRUD (single or batch, max 500/call)
-- `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` — Wiki
+- `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` / `get_wiki_node` — Wiki (v1.3.4 adds `get_wiki_node` which resolves a wiki node token to its underlying `obj_type` + `obj_token`, so you can feed the node straight into `read_doc`, bitable tools, etc.)
 - `list_files` / `create_folder` — Drive
 - `copy_file` / `move_file` / `delete_file` — Drive file operations (copy, move, delete)
 - `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
-- `download_image` — Download an image from a message (needs message_id + image_key from read_messages) and return it as MCP image content so the model can **see the pixels**, not just the key. Tries UAT first, falls back to app token (app path requires the bot to be in the chat).
+- `download_image` — Download an image and return it as MCP image content so the model **sees the pixels**. Two modes: (1) **message image** — pass `message_id` + `image_key` from read_messages. (2) **docx image** — pass `image_token` (from `get_doc_blocks` image block) and optionally `doc_token` (native id / wiki node / Feishu URL). Tries UAT first, falls back to app token.
+- `list_user_okrs` / `get_okrs` / `list_okr_periods` — OKR read. UAT-first (works for the authenticated user's OKRs) with app fallback when OKR scope is granted.
+- `list_calendars` / `list_calendar_events` / `get_calendar_event` — Calendar read. UAT-first (primary + shared + subscribed); app identity only sees calendars the bot was explicitly invited to.
 - `find_user` — Contact lookup by email/mobile
 
 ## Usage Patterns
+
+### Wiki-hosted content (docx / bitable / sheet)
+All docx and bitable tools now accept three input forms for their `document_id` / `app_token` parameter:
+- Native token (unchanged): `doccnXXX`, `docxXXX`, `bascnXXX`, ...
+- Wiki node token: `wikcnXXX`, `wikmXXX`, `wiknXXX`
+- Full Feishu URL: `https://xxx.feishu.cn/docx/XXX`, `.../wiki/XXX`, `.../base/XXX`
+The plugin resolves wiki nodes to their underlying `obj_token` via `getWikiNode`, then calls the normal docx / bitable endpoint. Results are cached for 10 min to avoid repeated node lookups.
+
+Create content directly into a Wiki space:
+- `create_doc` / `create_bitable` accept optional `wiki_space_id` (+ `wiki_parent_node_token`). The plugin creates the resource in drive, then calls `wiki/v2/spaces/{space_id}/nodes/move_docs_to_wiki` to attach it — returns `wikiNodeToken` on immediate success, or `wikiAttachTaskId` if Feishu queues the move.
+
+### Document images
+Read — `download_image` with `doc_token` + `image_token` returns the image as MCP image content (base64 + mimeType). `doc_token` accepts native id / wiki node / URL.
+Write — `create_doc_block` now has image shortcuts:
+- `image_path` (absolute local file path) → plugin creates an image block, uploads the pixels via `drive/v1/medias/upload_all`, and patches the block with the uploaded token.
+- `image_token` (already uploaded) → plugin creates block and attaches token.
+`update_doc_block` accepts `image_token` to swap the picture in an existing image block.
+
+### OKR
+1. `list_okr_periods` — find the period id for current quarter.
+2. `list_user_okrs(user_id=<open_id>, period_ids=[...])` — list the target user's OKRs.
+3. `get_okrs(okr_ids)` — batch fetch full objective + key result structure with progress + alignments.
+`user_id` is required — use your own open_id (from `get_login_status` / `search_contacts`) to read your own OKRs, or a colleague's open_id for theirs (subject to permissions).
+
+### Calendar
+1. `list_calendars` — get your calendars; the one with `type=primary` is your personal calendar.
+2. `list_calendar_events(calendar_id, start_time=<unix_sec>, end_time=<unix_sec>)` — list events in a time window.
+3. `get_calendar_event(calendar_id, event_id)` — full details (attendees, location, attachments, meeting link).
+
+### External-group message read (hardened in v1.3.4)
+`read_messages` and `read_p2p_messages` now expose a `via` field in the response (`"bot"`, `"user"`, or `"contacts"`) so callers can tell which identity actually read the data. When bot fails with a known code (external tenant / no permission / not in chat) the plugin hops straight to UAT; transient errors (rate limit / 5xx / ECONNRESET / fetch timeout) retry once with a 2 s delay before falling back. When UAT isn't configured, the error message now tells the user to run `npx feishu-user-plugin oauth` instead of leaking the raw Feishu payload.
 
 ### Messaging
 - Send text as yourself → `send_to_user` or `send_to_group`
@@ -359,6 +392,7 @@ When making ANY code change (new tools, bug fixes, features), update ALL of thes
 
 **本仓库内：**
 - `CLAUDE.md` — tool count, tool list, usage patterns, known limitations
+- `AGENTS.md` — **每次改 CLAUDE.md 必须同步**：正文（第 2 行起）与 CLAUDE.md 完全一致，仅首行标题保留 `# feishu-user-plugin — Codex Instructions`。同步命令：`tail -n +2 CLAUDE.md > /tmp/body.md && { echo "# feishu-user-plugin — Codex Instructions"; cat /tmp/body.md; } > AGENTS.md`
 - `README.md` — tool count (badge + heading + tool table), feature highlights, OpenClaw/Claude Code config examples
 - `ROADMAP.md` — check off completed items, add new findings
 - `package.json` — version, description (tool count)
@@ -482,6 +516,19 @@ feishu-user-plugin vX.Y.Z 发布
 - For Official API tools: can test directly via MCP tool call or standalone script using `readCredentials()` from `src/config.js`
 - For Cookie tools: need active session, test via MCP tool call
 - Always verify `_safeSDKCall` handles the response format (multipart uploads return data at top level, not nested under `.data`)
+
+## OAuth Scopes (when re-running `npx feishu-user-plugin oauth`)
+
+The v1.3.4 tools require additional scopes on the app + UAT:
+
+| Feature | Scopes to enable on app + include in OAuth |
+|---------|-------------------------------------------|
+| OKR read | `okr:okr:readonly`, `okr:period:read` |
+| Calendar read | `calendar:calendar:readonly`, `calendar:calendar.event:read` |
+| Docx image write (`uploadDocMedia`) | `drive:drive`, `docx:document`, `docx:document:readonly` (image upload piggy-backs on existing docx editing scopes) |
+| Wiki attach (`move_docs_to_wiki`) | `wiki:wiki` (edit scope, the readonly one is insufficient) |
+
+If a tool returns `access_denied` or error code `99991672` (scope not granted), enable the missing scope at https://open.feishu.cn/app → Permissions, then re-run `npx feishu-user-plugin oauth` so the UAT picks up the new scopes.
 
 ## Known Limitations
 - CARD message type (type=14) not yet implemented — complex JSON schema

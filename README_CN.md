@@ -3,12 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
-[![Tools](https://img.shields.io/badge/Tools-33-orange.svg)](#工具一览33-个)
+[![Tools](https://img.shields.io/badge/Tools-74-orange.svg)](#工具一览74-个)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [English](README.md) | **中文**
 
-**全能飞书 MCP 服务器 — 33 个工具，9 个技能，三层认证，覆盖消息、文档、多维表格、知识库和云盘。**
+**全能飞书 MCP 服务器 — 74 个工具，9 个技能，三层认证，覆盖消息、文档、多维表格、知识库、云盘、OKR、日历。**
 
 唯一支持以**你的真实身份**（而非机器人）发送飞书消息的 MCP 服务器，同时集成飞书官方 API 的全部能力。
 
@@ -34,7 +34,9 @@
 
 **一个插件，覆盖飞书全部场景。**
 
-## 工具一览（33 个）
+## 工具一览（74 个）
+
+完整的工具清单见 [CLAUDE.md](CLAUDE.md) 与 [CHANGELOG.md](CHANGELOG.md)。这里按类别列出主要能力：
 
 ### 用户身份 — 消息发送（逆向协议，Cookie 认证）
 
@@ -316,7 +318,7 @@ feishu-user-plugin/
 │       ├── SKILL.md         # 主技能定义（触发条件、工具、认证）
 │       └── references/      # 9 个技能参考文档 + CLAUDE.md
 ├── src/
-│   ├── index.js             # MCP 服务器入口（33 个工具）
+│   ├── index.js             # MCP 服务器入口（74 个工具）
 │   ├── client.js            # 用户身份客户端（Protobuf 网关）
 │   ├── official.js          # 官方 API 客户端（REST、UAT）
 │   ├── utils.js             # ID 生成器、Cookie 解析

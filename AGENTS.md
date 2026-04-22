@@ -1,4 +1,4 @@
-# feishu-user-plugin — Claude Code Instructions
+# feishu-user-plugin — Codex Instructions
 
 ## What This Is
 All-in-one Feishu plugin for Claude Code with three auth layers:

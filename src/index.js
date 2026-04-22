@@ -21,6 +21,7 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { LarkUserClient } = require('./client');
 const { LarkOfficialClient } = require('./official');
+const { resolveToObj, resolveToken, parseFeishuInput } = require('./resolver');
 
 // --- Chat ID Mapper ---
 
@@ -434,12 +435,14 @@ const TOOLS = [
   },
   {
     name: 'create_doc',
-    description: '[Official API] Create a new Feishu document.',
+    description: '[Official API] Create a new Feishu document. Can place directly under a Wiki space by passing wiki_space_id (optionally wiki_parent_node_token for nested placement) — the plugin creates the doc in drive then attaches it as a Wiki node.',
     inputSchema: {
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Document title' },
-        folder_id: { type: 'string', description: 'Parent folder token (optional)' },
+        folder_id: { type: 'string', description: 'Parent folder token (optional; ignored when wiki_space_id is set)' },
+        wiki_space_id: { type: 'string', description: 'Wiki space ID to place the doc under (optional)' },
+        wiki_parent_node_token: { type: 'string', description: 'Parent wiki node token within the space (optional; defaults to space root)' },
       },
       required: ['title'],
     },
@@ -448,12 +451,14 @@ const TOOLS = [
   // ========== Bitable — Official API ==========
   {
     name: 'create_bitable',
-    description: '[Official API] Create a new Bitable (multi-dimensional table) app.',
+    description: '[Official API] Create a new Bitable (multi-dimensional table) app. Can place directly under a Wiki space via wiki_space_id (and optional wiki_parent_node_token).',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Bitable app name' },
-        folder_id: { type: 'string', description: 'Parent folder token (optional, defaults to root)' },
+        folder_id: { type: 'string', description: 'Parent folder token (optional, defaults to root; ignored when wiki_space_id is set)' },
+        wiki_space_id: { type: 'string', description: 'Wiki space ID to place the bitable under (optional)' },
+        wiki_parent_node_token: { type: 'string', description: 'Parent wiki node token within the space (optional)' },
       },
     },
   },
@@ -830,29 +835,32 @@ const TOOLS = [
   // ========== Docs — Block Editing ==========
   {
     name: 'create_doc_block',
-    description: '[Official API] Insert content blocks into a document. Add text, headings, lists, etc. after create_doc.',
+    description: '[Official API] Insert content blocks into a document. Three modes:\n  (A) Generic — pass `children` array (e.g. [{block_type:2, text:{...}}]) for text/heading/list/etc.\n  (B) Image from local file — pass `image_path` (absolute path); the plugin creates an image block, uploads the file to drive, and patches the block with the token. Returns block_id + image_token.\n  (C) Image from uploaded token — pass `image_token` (from a previous uploadDocMedia or docx image block) to reuse an already-uploaded image.\n`document_id` accepts native document_id, wiki node token, or Feishu URL.',
     inputSchema: {
       type: 'object',
       properties: {
-        document_id: { type: 'string', description: 'Document ID' },
+        document_id: { type: 'string', description: 'Document ID, wiki node token, or Feishu URL' },
         parent_block_id: { type: 'string', description: 'Parent block ID (use document_id for root)' },
-        children: { type: 'array', description: 'Array of block objects to insert. E.g. [{block_type:2, text:{elements:[{text_run:{content:"Hello"}}]}}]', items: { type: 'object' } },
+        children: { type: 'array', description: 'Generic block objects — mode A. E.g. [{block_type:2, text:{elements:[{text_run:{content:"Hello"}}]}}]', items: { type: 'object' } },
+        image_path: { type: 'string', description: 'Local image path — mode B (mutually exclusive with children / image_token)' },
+        image_token: { type: 'string', description: 'Pre-uploaded docx image token — mode C (mutually exclusive with children / image_path)' },
         index: { type: 'number', description: 'Insert position (optional, appends to end if omitted)' },
       },
-      required: ['document_id', 'parent_block_id', 'children'],
+      required: ['document_id', 'parent_block_id'],
     },
   },
   {
     name: 'update_doc_block',
-    description: '[Official API] Update a specific block in a document (change text content, style, etc.).',
+    description: '[Official API] Update a specific block in a document. Generic mode: pass update_body. Image-replace mode: pass image_token to swap the picture in an existing image block. document_id accepts native ID, wiki node token, or Feishu URL.',
     inputSchema: {
       type: 'object',
       properties: {
-        document_id: { type: 'string', description: 'Document ID' },
+        document_id: { type: 'string', description: 'Document ID, wiki node token, or Feishu URL' },
         block_id: { type: 'string', description: 'Block ID to update' },
-        update_body: { type: 'object', description: 'Update payload. E.g. {update_text_elements:{elements:[{text_run:{content:"new text"}}]}}' },
+        update_body: { type: 'object', description: 'Generic update payload. E.g. {update_text_elements:{elements:[{text_run:{content:"new text"}}]}}' },
+        image_token: { type: 'string', description: 'Pre-uploaded image token — if provided, update_body is ignored and the block is patched with {replace_image:{token}}' },
       },
-      required: ['document_id', 'block_id', 'update_body'],
+      required: ['document_id', 'block_id'],
     },
   },
   {
@@ -1005,14 +1013,112 @@ const TOOLS = [
   // ========== Message Resources (Image/File Download) ==========
   {
     name: 'download_image',
-    description: '[User Identity / Official API] Download an image embedded in a message so the model can actually see it. Pass the message_id and image_key returned by read_messages / read_p2p_messages. Tries user identity first (works for any chat the user sees), falls back to app identity (requires the bot to be in the same chat).',
+    description: '[User Identity / Official API] Download an image so the model can actually see it. Two modes: (1) message image — pass message_id + image_key from read_messages / read_p2p_messages. (2) docx image — pass doc_token + image_token (the block.image.token from get_doc_blocks). doc_token accepts native document_id, wiki node token, or Feishu URL. Tries user identity first, falls back to app.',
     inputSchema: {
       type: 'object',
       properties: {
-        message_id: { type: 'string', description: 'The message_id (om_xxx) that contains the image — from read_messages / read_p2p_messages' },
-        image_key: { type: 'string', description: 'The image_key from the message content (img_xxx)' },
+        message_id: { type: 'string', description: 'Message ID (om_xxx) — for mode 1 only' },
+        image_key: { type: 'string', description: 'Image key (img_xxx) from message content — for mode 1 only' },
+        doc_token: { type: 'string', description: 'Document ID, wiki node token, or Feishu URL — for mode 2 only' },
+        image_token: { type: 'string', description: 'Image token from a docx image block (block.image.token via get_doc_blocks) — for mode 2 only' },
       },
-      required: ['message_id', 'image_key'],
+    },
+  },
+
+  // ========== Wiki Node — Object Resolution (v1.3.4) ==========
+  {
+    name: 'get_wiki_node',
+    description: '[Official API] Resolve a Wiki node token to its underlying object (docx / bitable / sheet / mindnote / file). Returns obj_type + obj_token + space_id so you can read/write the real resource via the usual docx / bitable tools. Accepts bare wiki node token (wikcnXXX) or a full Feishu /wiki/ URL.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        node_token: { type: 'string', description: 'Wiki node token (wikcnXXX / wikmXXX / wiknXXX) or full Feishu /wiki/<token> URL' },
+      },
+      required: ['node_token'],
+    },
+  },
+
+  // ========== OKR — Official API (v1.3.4) ==========
+  {
+    name: 'list_user_okrs',
+    description: '[Official API + UAT] List a user\'s OKRs. Requires the user\'s open_id (get yours via get_login_status or search_contacts). Filter by period_ids to narrow to a specific quarter.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: { type: 'string', description: 'Target user\'s open_id (or the matching user_id_type)' },
+        user_id_type: { type: 'string', enum: ['user_id', 'union_id', 'open_id', 'people_admin_id'], description: 'Type of user_id (default: open_id)' },
+        period_ids: { type: 'array', items: { type: 'string' }, description: 'Filter by OKR period IDs (optional). Get period IDs via list_okr_periods.' },
+        offset: { type: 'number', description: 'Pagination offset (default 0)' },
+        limit: { type: 'number', description: 'Items per page (default 10, max 10)' },
+        lang: { type: 'string', description: 'Response language (optional, e.g. "zh_cn", "en_us")' },
+      },
+      required: ['user_id'],
+    },
+  },
+  {
+    name: 'get_okrs',
+    description: '[Official API + UAT] Batch-fetch full OKR details (objectives, key results, progress, alignments) by OKR IDs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        okr_ids: { type: 'array', items: { type: 'string' }, description: 'OKR IDs (max 10 per call). From list_user_okrs.' },
+        user_id_type: { type: 'string', enum: ['user_id', 'union_id', 'open_id', 'people_admin_id'], description: 'Type of user_ids in response (default: open_id)' },
+        lang: { type: 'string', description: 'Response language (optional)' },
+      },
+      required: ['okr_ids'],
+    },
+  },
+  {
+    name: 'list_okr_periods',
+    description: '[Official API + UAT] List OKR periods (quarters / years) defined in the tenant. Use period_ids from this to filter list_user_okrs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_size: { type: 'number', description: 'Items per page (default 10)' },
+        page_token: { type: 'string', description: 'Pagination token' },
+      },
+    },
+  },
+
+  // ========== Calendar — Official API (v1.3.4) ==========
+  {
+    name: 'list_calendars',
+    description: '[Official API + UAT] List the current user\'s calendars (primary + shared + subscribed). Requires UAT — app identity only sees calendars it was explicitly invited to. Requires `calendar:calendar:readonly` scope on the OAuth.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        page_size: { type: 'number', description: 'Items per page (min 50, default 50). Feishu\'s calendar endpoint rejects page_size < 50.' },
+        page_token: { type: 'string', description: 'Pagination token' },
+        sync_token: { type: 'string', description: 'Incremental sync token (optional)' },
+      },
+    },
+  },
+  {
+    name: 'list_calendar_events',
+    description: '[Official API + UAT] List events in a calendar within an optional time range. Typical usage: first list_calendars to find calendar_id (primary calendar has type="primary"), then list events in e.g. [now, now+7d] (Unix seconds).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendar_id: { type: 'string', description: 'Calendar ID from list_calendars' },
+        start_time: { type: 'string', description: 'Range start (Unix seconds, optional)' },
+        end_time: { type: 'string', description: 'Range end (Unix seconds, optional)' },
+        page_size: { type: 'number', description: 'Items per page (default 50)' },
+        page_token: { type: 'string', description: 'Pagination token' },
+        sync_token: { type: 'string', description: 'Incremental sync token (optional)' },
+      },
+      required: ['calendar_id'],
+    },
+  },
+  {
+    name: 'get_calendar_event',
+    description: '[Official API + UAT] Get full details of a single calendar event (summary, description, start/end, attendees, location, attachments, meeting link).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        calendar_id: { type: 'string', description: 'Calendar ID' },
+        event_id: { type: 'string', description: 'Event ID from list_calendar_events' },
+      },
+      required: ['calendar_id', 'event_id'],
     },
   },
 
@@ -1039,6 +1145,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 const text = (s) => ({ content: [{ type: 'text', text: s }] });
 const json = (o) => text(JSON.stringify(o, null, 2));
 const sendResult = (r, desc) => text(r.success ? desc : `Send failed (status: ${r.status})`);
+
+// Resolver helper: turn document_id / app_token / wiki node / Feishu URL into
+// a native token. No-op for already-native inputs. See src/resolver.js.
+async function resolveDocId(input) {
+  if (!input) return input;
+  return resolveToken(input, getOfficialClient());
+}
 
 async function handleTool(name, args) {
 
@@ -1226,32 +1339,21 @@ async function handleTool(name, args) {
       // Get userClient for name resolution fallback (best-effort)
       let uc = null;
       try { uc = await getUserClient(); } catch (_) {}
-      const resolvedChatId = await chatIdMapper.resolveToOcId(args.chat_id, official);
 
-      // Try bot API first if we resolved an oc_ ID
+      // Path A — chat_id that resolves inside bot's / official search scope.
+      const resolvedChatId = await chatIdMapper.resolveToOcId(args.chat_id, official);
       if (resolvedChatId) {
-        try {
-          return json(await official.readMessages(resolvedChatId, msgOpts, uc));
-        } catch (botErr) {
-          // Bot API failed (e.g. bot not in group, no permission) — fall through to UAT
-          console.error(`[feishu-user-plugin] read_messages bot API failed for ${resolvedChatId}: ${botErr.message}`);
-          if (official.hasUAT) {
-            try {
-              return json(await official.readMessagesAsUser(resolvedChatId, msgOpts, uc));
-            } catch (uatErr) {
-              console.error(`[feishu-user-plugin] read_messages UAT fallback also failed for ${resolvedChatId}: ${uatErr.message}`);
-            }
-          }
-          throw botErr; // Re-throw original error if UAT also failed
-        }
+        return json(await official.readMessagesWithFallback(resolvedChatId, msgOpts, uc));
       }
 
-      // Bot couldn't resolve the chat name — try search_contacts + UAT for external groups
+      // Path B — external group discovered only via cookie search_contacts.
+      // When we got here the bot definitely can't see it, so skip bot entirely
+      // and go straight to UAT with a `contacts` via label.
       if (official.hasUAT) {
         if (!uc) try { uc = await getUserClient(); } catch (_) {}
         const contactChatId = await chatIdMapper.resolveViaContacts(args.chat_id, uc);
         if (contactChatId) {
-          return json(await official.readMessagesAsUser(contactChatId, msgOpts, uc));
+          return json(await official.readMessagesWithFallback(contactChatId, msgOpts, uc, { skipBot: true, via: 'contacts' }));
         }
       }
 
@@ -1267,56 +1369,70 @@ async function handleTool(name, args) {
     case 'search_docs':
       return json(await getOfficialClient().searchDocs(args.query));
     case 'read_doc':
-      return json(await getOfficialClient().readDoc(args.document_id));
+      return json(await getOfficialClient().readDoc(await resolveDocId(args.document_id)));
     case 'get_doc_blocks':
-      return json(await getOfficialClient().getDocBlocks(args.document_id));
+      return json(await getOfficialClient().getDocBlocks(await resolveDocId(args.document_id)));
     case 'create_doc': {
-      const r = await getOfficialClient().createDoc(args.title, args.folder_id);
+      const r = await getOfficialClient().createDoc(args.title, args.folder_id, {
+        wikiSpaceId: args.wiki_space_id,
+        wikiParentNodeToken: args.wiki_parent_node_token,
+      });
       const ownership = r.viaUser ? ' (as user)' : ' (as app — UAT unavailable or failed; document owned by the app, not you)';
-      return text(`Document created${ownership}: ${r.documentId}`);
+      const wikiNote = r.wikiNodeToken ? ` [wiki node: ${r.wikiNodeToken}]`
+        : r.wikiAttachTaskId ? ` [wiki attach queued — task_id: ${r.wikiAttachTaskId}]`
+        : r.wikiAttachError ? ` [WARNING: wiki attach failed — ${r.wikiAttachError}. Doc exists in drive root/folder.]`
+        : '';
+      return text(`Document created${ownership}: ${r.documentId}${wikiNote}`);
     }
 
     // --- Official API: Bitable ---
 
     case 'create_bitable': {
-      const r = await getOfficialClient().createBitable(args.name, args.folder_id);
+      const r = await getOfficialClient().createBitable(args.name, args.folder_id, {
+        wikiSpaceId: args.wiki_space_id,
+        wikiParentNodeToken: args.wiki_parent_node_token,
+      });
       const ownership = r.viaUser ? ' (as user)' : ' (as app — UAT unavailable or failed; bitable owned by the app, not you)';
-      return text(`Bitable created${ownership}: ${r.appToken}\nURL: ${r.url || ''}`);
+      const wikiNote = r.wikiNodeToken ? `\nWiki node: ${r.wikiNodeToken}`
+        : r.wikiAttachTaskId ? `\nWiki attach queued — task_id: ${r.wikiAttachTaskId}`
+        : r.wikiAttachError ? `\nWARNING: wiki attach failed — ${r.wikiAttachError}. Bitable exists in drive root/folder.`
+        : '';
+      return text(`Bitable created${ownership}: ${r.appToken}\nURL: ${r.url || ''}${wikiNote}`);
     }
     case 'list_bitable_tables':
-      return json(await getOfficialClient().listBitableTables(args.app_token));
+      return json(await getOfficialClient().listBitableTables(await resolveDocId(args.app_token)));
     case 'create_bitable_table':
-      return text(`Table created: ${(await getOfficialClient().createBitableTable(args.app_token, args.name, args.fields)).tableId}`);
+      return text(`Table created: ${(await getOfficialClient().createBitableTable(await resolveDocId(args.app_token), args.name, args.fields)).tableId}`);
     case 'list_bitable_fields':
-      return json(await getOfficialClient().listBitableFields(args.app_token, args.table_id));
+      return json(await getOfficialClient().listBitableFields(await resolveDocId(args.app_token), args.table_id));
     case 'create_bitable_field': {
       const config = { field_name: args.field_name, type: args.type };
       if (args.property) config.property = args.property;
-      return json(await getOfficialClient().createBitableField(args.app_token, args.table_id, config));
+      return json(await getOfficialClient().createBitableField(await resolveDocId(args.app_token), args.table_id, config));
     }
     case 'update_bitable_field': {
       const config = {};
       if (args.field_name) config.field_name = args.field_name;
       if (args.type) config.type = args.type;
       if (args.property) config.property = args.property;
-      return json(await getOfficialClient().updateBitableField(args.app_token, args.table_id, args.field_id, config));
+      return json(await getOfficialClient().updateBitableField(await resolveDocId(args.app_token), args.table_id, args.field_id, config));
     }
     case 'delete_bitable_field': {
-      const r = await getOfficialClient().deleteBitableField(args.app_token, args.table_id, args.field_id);
+      const r = await getOfficialClient().deleteBitableField(await resolveDocId(args.app_token), args.table_id, args.field_id);
       return text(r.deleted ? `Field ${r.fieldId} deleted` : `Field deletion returned deleted=${r.deleted}`);
     }
     case 'list_bitable_views':
-      return json(await getOfficialClient().listBitableViews(args.app_token, args.table_id));
+      return json(await getOfficialClient().listBitableViews(await resolveDocId(args.app_token), args.table_id));
     case 'search_bitable_records':
-      return json(await getOfficialClient().searchBitableRecords(args.app_token, args.table_id, {
+      return json(await getOfficialClient().searchBitableRecords(await resolveDocId(args.app_token), args.table_id, {
         filter: args.filter, sort: args.sort, pageSize: args.page_size,
       }));
     case 'batch_create_bitable_records':
-      return json(await getOfficialClient().batchCreateBitableRecords(args.app_token, args.table_id, args.records));
+      return json(await getOfficialClient().batchCreateBitableRecords(await resolveDocId(args.app_token), args.table_id, args.records));
     case 'batch_update_bitable_records':
-      return json(await getOfficialClient().batchUpdateBitableRecords(args.app_token, args.table_id, args.records));
+      return json(await getOfficialClient().batchUpdateBitableRecords(await resolveDocId(args.app_token), args.table_id, args.records));
     case 'batch_delete_bitable_records':
-      return json(await getOfficialClient().batchDeleteBitableRecords(args.app_token, args.table_id, args.record_ids));
+      return json(await getOfficialClient().batchDeleteBitableRecords(await resolveDocId(args.app_token), args.table_id, args.record_ids));
 
     // --- Official API: Wiki ---
 
@@ -1394,29 +1510,54 @@ async function handleTool(name, args) {
 
     // --- Official API: Doc Block Editing ---
 
-    case 'create_doc_block':
-      return json(await getOfficialClient().createDocBlock(args.document_id, args.parent_block_id, args.children, args.index));
-    case 'update_doc_block':
-      return json(await getOfficialClient().updateDocBlock(args.document_id, args.block_id, args.update_body));
+    case 'create_doc_block': {
+      const official = getOfficialClient();
+      const docId = await resolveDocId(args.document_id);
+      // Image shortcut: if image_path or image_token is provided, orchestrate the
+      // 3-step docx image creation. Mutually exclusive with children.
+      if (args.image_path || args.image_token) {
+        if (args.children) return text('create_doc_block: pass children OR image_path OR image_token, not both.');
+        const r = await official.createDocBlockWithImage(docId, args.parent_block_id, {
+          imagePath: args.image_path,
+          imageToken: args.image_token,
+          index: args.index,
+        });
+        return json(r);
+      }
+      if (!args.children) return text('create_doc_block: children (generic blocks), image_path, or image_token is required.');
+      return json(await official.createDocBlock(docId, args.parent_block_id, args.children, args.index));
+    }
+    case 'update_doc_block': {
+      const official = getOfficialClient();
+      const docId = await resolveDocId(args.document_id);
+      if (args.image_token && args.update_body) {
+        return text('update_doc_block: pass image_token OR update_body, not both.');
+      }
+      if (args.image_token) {
+        return json(await official.updateDocBlockImage(docId, args.block_id, args.image_token));
+      }
+      if (!args.update_body) return text('update_doc_block: update_body or image_token is required.');
+      return json(await official.updateDocBlock(docId, args.block_id, args.update_body));
+    }
     case 'delete_doc_blocks':
-      return text(`Blocks deleted: ${(await getOfficialClient().deleteDocBlocks(args.document_id, args.parent_block_id, args.start_index, args.end_index)).deleted}`);
+      return text(`Blocks deleted: ${(await getOfficialClient().deleteDocBlocks(await resolveDocId(args.document_id), args.parent_block_id, args.start_index, args.end_index)).deleted}`);
 
     // --- Official API: Bitable Additional ---
 
     case 'get_bitable_record':
-      return json(await getOfficialClient().getBitableRecord(args.app_token, args.table_id, args.record_id));
+      return json(await getOfficialClient().getBitableRecord(await resolveDocId(args.app_token), args.table_id, args.record_id));
     case 'delete_bitable_table':
-      return text(`Table deleted: ${(await getOfficialClient().deleteBitableTable(args.app_token, args.table_id)).deleted}`);
+      return text(`Table deleted: ${(await getOfficialClient().deleteBitableTable(await resolveDocId(args.app_token), args.table_id)).deleted}`);
     case 'get_bitable_meta':
-      return json(await getOfficialClient().getBitableMeta(args.app_token));
+      return json(await getOfficialClient().getBitableMeta(await resolveDocId(args.app_token)));
     case 'update_bitable_table':
-      return text(`Table renamed: ${(await getOfficialClient().updateBitableTable(args.app_token, args.table_id, args.name)).name}`);
+      return text(`Table renamed: ${(await getOfficialClient().updateBitableTable(await resolveDocId(args.app_token), args.table_id, args.name)).name}`);
     case 'create_bitable_view':
-      return json(await getOfficialClient().createBitableView(args.app_token, args.table_id, args.view_name, args.view_type));
+      return json(await getOfficialClient().createBitableView(await resolveDocId(args.app_token), args.table_id, args.view_name, args.view_type));
     case 'delete_bitable_view':
-      return text(`View deleted: ${(await getOfficialClient().deleteBitableView(args.app_token, args.table_id, args.view_id)).deleted}`);
+      return text(`View deleted: ${(await getOfficialClient().deleteBitableView(await resolveDocId(args.app_token), args.table_id, args.view_id)).deleted}`);
     case 'copy_bitable':
-      return json(await getOfficialClient().copyBitable(args.app_token, args.name, args.folder_id));
+      return json(await getOfficialClient().copyBitable(await resolveDocId(args.app_token), args.name, args.folder_id));
 
     // --- Official API: Drive File Operations ---
 
@@ -1428,16 +1569,58 @@ async function handleTool(name, args) {
       return text(`File deleted: task=${(await getOfficialClient().deleteFile(args.file_token, args.type)).taskId}`);
 
     case 'download_image': {
-      const r = await getOfficialClient().downloadMessageResource(args.message_id, args.image_key, 'image');
+      const official = getOfficialClient();
+      let r;
+      let source;
+      if (args.image_token) {
+        // Docx image mode — doc_token may be a URL / wiki node; resolve it.
+        const docToken = args.doc_token ? await resolveDocId(args.doc_token) : undefined;
+        r = await official.downloadDocImage(args.image_token, docToken);
+        source = docToken ? `docx ${docToken}` : 'drive media';
+      } else if (args.message_id && args.image_key) {
+        r = await official.downloadMessageResource(args.message_id, args.image_key, 'image');
+        source = `message ${args.message_id}`;
+      } else {
+        return text('download_image requires either (message_id + image_key) for chat images, or (image_token, optionally with doc_token) for docx images.');
+      }
       // Return as MCP image content so the model sees the pixels directly.
-      // Also include a tiny text preamble so the via-identity + size are visible in transcript.
       return {
         content: [
-          { type: 'text', text: `Image downloaded (${r.viaUser ? 'as user' : 'as app'}, ${r.bytes} bytes, ${r.mimeType}):` },
+          { type: 'text', text: `Image downloaded from ${source} (${r.viaUser ? 'as user' : 'as app'}, ${r.bytes} bytes, ${r.mimeType}):` },
           { type: 'image', data: r.base64, mimeType: r.mimeType },
         ],
       };
     }
+
+    // --- Wiki Node Resolution (v1.3.4) ---
+    case 'get_wiki_node': {
+      // Accept either a bare wiki node token or a full /wiki/ URL — parse first.
+      const parsed = parseFeishuInput(args.node_token);
+      const token = (parsed.kind === 'wiki' || parsed.kind === 'raw') ? parsed.token : args.node_token;
+      return json(await getOfficialClient().getWikiNode(token));
+    }
+
+    // --- OKR (v1.3.4) ---
+    case 'list_user_okrs':
+      return json(await getOfficialClient().listUserOkrs(args.user_id, {
+        periodIds: args.period_ids, offset: args.offset, limit: args.limit, lang: args.lang,
+        userIdType: args.user_id_type,
+      }));
+    case 'get_okrs':
+      return json(await getOfficialClient().getOkrs(args.okr_ids, { lang: args.lang, userIdType: args.user_id_type }));
+    case 'list_okr_periods':
+      return json(await getOfficialClient().listOkrPeriods({ pageSize: args.page_size, pageToken: args.page_token }));
+
+    // --- Calendar (v1.3.4) ---
+    case 'list_calendars':
+      return json(await getOfficialClient().listCalendars({ pageSize: args.page_size, pageToken: args.page_token, syncToken: args.sync_token }));
+    case 'list_calendar_events':
+      return json(await getOfficialClient().listCalendarEvents(args.calendar_id, {
+        startTime: args.start_time, endTime: args.end_time,
+        pageSize: args.page_size, pageToken: args.page_token, syncToken: args.sync_token,
+      }));
+    case 'get_calendar_event':
+      return json(await getOfficialClient().getCalendarEvent(args.calendar_id, args.event_id));
 
     default:
       return text(`Unknown tool: ${name}`);

@@ -1,5 +1,7 @@
 const lark = require('@larksuiteoapi/node-sdk');
 const { fetchWithTimeout } = require('./utils');
+const { classifyError } = require('./error-codes');
+const { buildEmptyImageBlock, buildReplaceImagePayload } = require('./doc-blocks');
 
 // Redirect all Lark SDK logs to stderr.
 // The SDK's defaultLogger.error uses console.log (stdout), which corrupts
@@ -139,6 +141,14 @@ class LarkOfficialClient {
     const data = await fn(uat);
     // Known auth error codes: 99991668 (invalid), 99991663 (expired), 99991677 (auth_expired)
     if (data.code === 99991668 || data.code === 99991663 || data.code === 99991677) {
+      // 99991668 is overloaded: "invalid token" (→ refresh helps) vs
+      // "endpoint doesn't support UAT at all" (→ refresh is pointless, and
+      // worse, it consumes a one-shot refresh_token rotation). The second
+      // case is identifiable by the msg "user access token not support" or
+      // "not support". If so, surface the code to the caller without refresh.
+      if (data.code === 99991668 && typeof data.msg === 'string' && /not support/i.test(data.msg)) {
+        return data;
+      }
       // Token invalid/expired — try refresh once
       uat = await this._refreshUAT();
       return fn(uat);
@@ -147,8 +157,20 @@ class LarkOfficialClient {
   }
 
   // Generic UAT REST helper. Returns parsed JSON ({code, msg, data}).
+  // Array query values are expanded to repeated keys (period_ids=a&period_ids=b)
+  // because several Feishu endpoints (OKR, calendar) rely on that convention.
   async _uatREST(method, path, { body, query } = {}) {
-    const qs = query ? '?' + new URLSearchParams(query).toString() : '';
+    let qs = '';
+    if (query) {
+      const sp = new URLSearchParams();
+      for (const [k, v] of Object.entries(query)) {
+        if (v === undefined || v === null) continue;
+        if (Array.isArray(v)) { for (const item of v) sp.append(k, String(item)); }
+        else sp.append(k, String(v));
+      }
+      const str = sp.toString();
+      if (str) qs = '?' + str;
+    }
     const url = 'https://open.feishu.cn' + path + qs;
     return this._withUAT(async (uat) => {
       const headers = { 'Authorization': `Bearer ${uat}` };
@@ -166,7 +188,12 @@ class LarkOfficialClient {
   // Returns SDK-shaped {code, msg, data, _viaUser}. _viaUser is true iff the UAT call succeeded;
   // callers can surface this to distinguish "created by user" vs "created by app" for resources
   // whose ownership matters (docs, bitables, folders).
+  //
+  // When BOTH paths fail (common for OKR/Calendar if neither UAT nor app has the scope),
+  // the final error includes the UAT-side reason too, so the user can tell whether they
+  // need a new OAuth (UAT missing scope) or a different app (app missing scope).
   async _asUserOrApp({ uatPath, method = 'GET', body, query, sdkFn, label }) {
+    let uatSummary = null;
     if (this.hasUAT) {
       try {
         const data = await this._uatREST(method, uatPath, { body, query });
@@ -174,14 +201,26 @@ class LarkOfficialClient {
           data._viaUser = true;
           return data;
         }
-        console.error(`[feishu-user-plugin] ${label} as user failed (${data.code}: ${data.msg}), retrying as app`);
+        uatSummary = `as user: code=${data.code} msg=${data.msg}`;
+        console.error(`[feishu-user-plugin] ${label} ${uatSummary}, retrying as app`);
       } catch (err) {
+        uatSummary = `as user: ${err.message}`;
         console.error(`[feishu-user-plugin] ${label} as user threw (${err.message}), retrying as app`);
       }
     }
-    const appData = await this._safeSDKCall(sdkFn, label);
-    if (appData && typeof appData === 'object') appData._viaUser = false;
-    return appData;
+    try {
+      const appData = await this._safeSDKCall(sdkFn, label);
+      if (appData && typeof appData === 'object') appData._viaUser = false;
+      return appData;
+    } catch (appErr) {
+      if (uatSummary) {
+        const err = new Error(`${label} failed on both identities. ${uatSummary}. as app: ${appErr.message}`);
+        err.uatSummary = uatSummary;
+        err.appError = appErr;
+        throw err;
+      }
+      throw appErr;
+    }
   }
 
   async listChatsAsUser({ pageSize = 20, pageToken } = {}) {
@@ -514,7 +553,7 @@ class LarkOfficialClient {
     return { content: res.data.content };
   }
 
-  async createDoc(title, folderId) {
+  async createDoc(title, folderId, { wikiSpaceId, wikiParentNodeToken } = {}) {
     const res = await this._asUserOrApp({
       uatPath: `/open-apis/docx/v1/documents`,
       method: 'POST',
@@ -522,7 +561,18 @@ class LarkOfficialClient {
       sdkFn: () => this.client.docx.document.create({ data: { title, folder_token: folderId || '' } }),
       label: 'createDoc',
     });
-    return { documentId: res.data.document?.document_id, viaUser: !!res._viaUser };
+    const documentId = res.data.document?.document_id;
+    const out = { documentId, viaUser: !!res._viaUser };
+    if (documentId && wikiSpaceId) {
+      try {
+        const node = await this.attachToWiki(wikiSpaceId, 'docx', documentId, wikiParentNodeToken);
+        if (node?.node_token) out.wikiNodeToken = node.node_token;
+        else if (node?.task_id) out.wikiAttachTaskId = node.task_id;
+      } catch (e) {
+        out.wikiAttachError = e.message;
+      }
+    }
+    return out;
   }
 
   async getDocBlocks(documentId) {
@@ -591,7 +641,7 @@ class LarkOfficialClient {
 
   // --- Bitable ---
 
-  async createBitable(name, folderId) {
+  async createBitable(name, folderId, { wikiSpaceId, wikiParentNodeToken } = {}) {
     const data = {};
     if (name) data.name = name;
     if (folderId) data.folder_token = folderId;
@@ -602,7 +652,18 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.app.create({ data }),
       label: 'createBitable',
     });
-    return { appToken: res.data.app?.app_token, name: res.data.app?.name, url: res.data.app?.url, viaUser: !!res._viaUser };
+    const appToken = res.data.app?.app_token;
+    const out = { appToken, name: res.data.app?.name, url: res.data.app?.url, viaUser: !!res._viaUser };
+    if (appToken && wikiSpaceId) {
+      try {
+        const node = await this.attachToWiki(wikiSpaceId, 'bitable', appToken, wikiParentNodeToken);
+        if (node?.node_token) out.wikiNodeToken = node.node_token;
+        else if (node?.task_id) out.wikiAttachTaskId = node.task_id;
+      } catch (e) {
+        out.wikiAttachError = e.message;
+      }
+    }
+    return out;
   }
 
   async listBitableTables(appToken) {
@@ -854,7 +915,10 @@ class LarkOfficialClient {
     return { items: res.data.docs_entities || [] };
   }
 
-  async getWikiNode(spaceId, nodeToken) {
+  // Resolves a wiki node token to its underlying object (docx / sheet / bitable / ...).
+  // `spaceId` argument is kept for backward compatibility but isn't used — the Feishu
+  // endpoint `wiki.v2.getNode` takes only the token.
+  async getWikiNode(nodeToken, _spaceId) {
     const res = await this._safeSDKCall(() => this.client.wiki.space.getNode({ params: { token: nodeToken } }), 'getNode');
     return res.data.node;
   }
@@ -1054,6 +1118,408 @@ class LarkOfficialClient {
     const n = parseInt(ts);
     // Feishu returns millisecond strings; normalize to seconds
     return String(n > 1e12 ? Math.floor(n / 1000) : n);
+  }
+
+  // --- Hardened Message Read (v1.3.4) ---
+
+  // Reads messages with explicit fallback routing: tries the bot path first,
+  // classifies any failure via error-codes.js, and escalates to UAT when
+  // appropriate. Returns the same shape as readMessages/readMessagesAsUser
+  // plus `via` ('bot' | 'user' | 'contacts') and, if fallback fired,
+  // `via_reason` (a short enum from classifyError).
+  //
+  // If `skipBot` is true, the bot path is never attempted (callers use this
+  // when the chat_id came from search_contacts — i.e. definitely external).
+  //
+  // Throws a single, wrapped error if BOTH paths fail or if UAT is absent and
+  // the bot failed; the message points the user at `npx feishu-user-plugin oauth`.
+  async readMessagesWithFallback(chatId, options, userClient, { skipBot = false, via = 'bot' } = {}) {
+    const tryUAT = async (viaLabel, reason) => {
+      if (!this.hasUAT) {
+        const hint = 'To read external / private groups, configure UAT via: npx feishu-user-plugin oauth';
+        const err = new Error(`Cannot read chat ${chatId} as bot (${reason || 'bot failed and no UAT configured'}). ${hint}`);
+        err.viaReason = reason;
+        throw err;
+      }
+      const data = await this.readMessagesAsUser(chatId, options, userClient);
+      data.via = viaLabel;
+      if (reason) data.via_reason = reason;
+      return data;
+    };
+
+    if (skipBot) {
+      return tryUAT(via || 'contacts', 'contacts_resolved_external');
+    }
+
+    // Attempt 1 — bot identity.
+    try {
+      const data = await this.readMessages(chatId, options, userClient);
+      data.via = 'bot';
+      return data;
+    } catch (botErr) {
+      const klass = classifyError(botErr);
+      console.error(`[feishu-user-plugin] read_messages bot failed for ${chatId}: ${botErr.message} [class=${klass.action}, reason=${klass.reason}, code=${klass.code}]`);
+
+      if (klass.action === 'retry') {
+        // One retry after short backoff before hopping to UAT.
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          const data = await this.readMessages(chatId, options, userClient);
+          data.via = 'bot';
+          data.via_reason = klass.reason + '_recovered';
+          return data;
+        } catch (retryErr) {
+          console.error(`[feishu-user-plugin] read_messages bot retry failed for ${chatId}: ${retryErr.message}`);
+        }
+      }
+
+      // Fall through to UAT — if UAT is missing, tryUAT throws the user-friendly
+      // "run npx feishu-user-plugin oauth" error instead of the raw Feishu payload.
+      return tryUAT('user', klass.reason);
+    }
+  }
+
+  // --- Docx Image Read (v1.3.4) ---
+
+  // Download a media asset (image, file, etc.) referenced from inside a Feishu
+  // docx block. The model actually gets the pixels via MCP image content in the
+  // handler layer; here we just return base64 + metadata.
+  //
+  // Feishu's drive/v1/medias/{token}/download requires a query `extra` with
+  // a JSON-encoded doc_token when the media lives inside a doc (to pass
+  // tenant-scoped auth). Passing extra is harmless for generic drive files.
+  async downloadDocImage(imageToken, docToken, docType = 'docx') {
+    if (!imageToken) throw new Error('downloadDocImage: imageToken is required');
+    // Feishu's drive media download uses `extra` as a JSON-string query param to
+    // identify the enclosing doc context. Most observed forms carry both
+    // `doc_type` and `doc_token`; omitting docType falls back to 'docx' which
+    // is the by-far most common case. Omitting extra entirely is safe for
+    // standalone drive-media tokens that don't live inside a doc.
+    const extra = docToken
+      ? `?extra=${encodeURIComponent(JSON.stringify({ doc_type: docType, doc_token: docToken }))}`
+      : '';
+    const path = `/open-apis/drive/v1/medias/${encodeURIComponent(imageToken)}/download${extra}`;
+    const url = 'https://open.feishu.cn' + path;
+
+    // Attempt 1 — user identity (most reliable for user-owned docs).
+    if (this.hasUAT) {
+      try {
+        const uat = await this._getValidUAT();
+        const res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${uat}` }, timeoutMs: 60000 });
+        if (res.ok && !res.headers.get('content-type')?.includes('application/json')) {
+          const buf = Buffer.from(await res.arrayBuffer());
+          return {
+            base64: buf.toString('base64'),
+            mimeType: res.headers.get('content-type') || 'application/octet-stream',
+            bytes: buf.length,
+            viaUser: true,
+          };
+        }
+        const errJson = await res.json().catch(() => null);
+        console.error(`[feishu-user-plugin] downloadDocImage as user failed: ${errJson?.code}: ${errJson?.msg || res.statusText}, retrying as app`);
+      } catch (e) {
+        console.error(`[feishu-user-plugin] downloadDocImage as user threw (${e.message}), retrying as app`);
+      }
+    }
+
+    // Attempt 2 — app identity. Requires the app to have drive access to the doc.
+    const token = await this._getAppToken();
+    const res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${token}` }, timeoutMs: 60000 });
+    if (!res.ok || res.headers.get('content-type')?.includes('application/json')) {
+      const errJson = await res.json().catch(() => null);
+      throw new Error(`downloadDocImage failed: ${errJson?.code}: ${errJson?.msg || res.statusText}. Note: app identity requires drive access to the document; configure UAT for user-owned docs.`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    return {
+      base64: buf.toString('base64'),
+      mimeType: res.headers.get('content-type') || 'application/octet-stream',
+      bytes: buf.length,
+      viaUser: false,
+    };
+  }
+
+  // --- Docx Image Write (v1.3.4) ---
+
+  // Upload binary media (typically an image) to Feishu's drive layer so it can
+  // be attached to a docx block. Returns the media's file_token, which is what
+  // the image block's `replace_image.token` expects.
+  //
+  // parentType = 'docx_image' for doc-embedded images (most common).
+  // parentNode = the block_id of the image placeholder (NOT the document_id).
+  async uploadDocMedia(filePath, parentNode, parentType = 'docx_image') {
+    const fs = require('fs');
+    const path = require('path');
+    if (!filePath) throw new Error('uploadDocMedia: filePath is required');
+    if (!parentNode) throw new Error('uploadDocMedia: parentNode (block_id) is required');
+
+    const stat = fs.statSync(filePath);
+    const fileName = path.basename(filePath);
+    const buf = fs.readFileSync(filePath);
+
+    // Best-effort content-type from extension. Feishu doesn't require it but
+    // some CDNs behind the API key off it; the Blob default is text/plain
+    // which would look wrong for binary images.
+    const ext = path.extname(fileName).toLowerCase();
+    const mimeMap = {
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+      '.bmp': 'image/bmp', '.tiff': 'image/tiff', '.ico': 'image/x-icon',
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    const doUpload = async (bearer) => {
+      const form = new FormData();
+      form.append('file_name', fileName);
+      form.append('parent_type', parentType);
+      form.append('parent_node', parentNode);
+      form.append('size', String(stat.size));
+      form.append('file', new Blob([buf], { type: contentType }), fileName);
+      const res = await fetchWithTimeout('https://open.feishu.cn/open-apis/drive/v1/medias/upload_all', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${bearer}` },
+        body: form,
+        timeoutMs: 120000,
+      });
+      return res.json();
+    };
+
+    // User identity first — docx_image usually belongs to a user-owned doc.
+    if (this.hasUAT) {
+      try {
+        const data = await this._withUAT(doUpload);
+        if (data.code === 0 && data.data?.file_token) {
+          return { fileToken: data.data.file_token, viaUser: true };
+        }
+        console.error(`[feishu-user-plugin] uploadDocMedia as user failed (${data.code}: ${data.msg}), retrying as app`);
+      } catch (e) {
+        console.error(`[feishu-user-plugin] uploadDocMedia as user threw (${e.message}), retrying as app`);
+      }
+    }
+    const appToken = await this._getAppToken();
+    const data = await doUpload(appToken);
+    if (data.code !== 0 || !data.data?.file_token) {
+      throw new Error(`uploadDocMedia failed: ${data.code}: ${data.msg || 'no file_token returned'}`);
+    }
+    return { fileToken: data.data.file_token, viaUser: false };
+  }
+
+  // Create a new image block and populate it from either a local file path or
+  // an already-uploaded media token. Orchestrates the three-step Feishu flow:
+  //   1) create empty image placeholder block
+  //   2) upload pixels (skipped if caller passes a ready-made imageToken)
+  //   3) patch the placeholder with the uploaded token
+  // Returns { blockId, imageToken, viaUser }.
+  async createDocBlockWithImage(documentId, parentBlockId, { imagePath, imageToken, index } = {}) {
+    if (!imagePath && !imageToken) {
+      throw new Error('createDocBlockWithImage: either imagePath or imageToken is required');
+    }
+
+    // Step 1 — empty placeholder.
+    const placeholder = buildEmptyImageBlock();
+    const createBody = { children: [placeholder] };
+    if (index !== undefined) createBody.index = index;
+    const created = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${parentBlockId}/children`,
+      method: 'POST',
+      body: createBody,
+      sdkFn: () => this.client.docx.documentBlockChildren.create({
+        path: { document_id: documentId, block_id: parentBlockId },
+        data: createBody,
+      }),
+      label: 'createDocBlockWithImage.placeholder',
+    });
+    const newBlock = (created.data.children || [])[0];
+    const blockId = newBlock?.block_id;
+    if (!blockId) throw new Error(`createDocBlockWithImage: placeholder creation returned no block_id: ${JSON.stringify(created.data).slice(0, 400)}`);
+
+    // Step 2 — upload (if needed).
+    let finalToken = imageToken;
+    let viaUser = !!created._viaUser;
+    if (!finalToken) {
+      const uploaded = await this.uploadDocMedia(imagePath, blockId, 'docx_image');
+      finalToken = uploaded.fileToken;
+      viaUser = viaUser && uploaded.viaUser; // true iff both steps went via user
+    }
+
+    // Step 3 — attach token to the placeholder via PATCH replace_image.
+    const patch = buildReplaceImagePayload(finalToken);
+    await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${blockId}`,
+      method: 'PATCH',
+      body: patch,
+      sdkFn: () => this.client.docx.documentBlock.patch({
+        path: { document_id: documentId, block_id: blockId },
+        data: patch,
+      }),
+      label: 'createDocBlockWithImage.replaceImage',
+    });
+
+    return { blockId, imageToken: finalToken, viaUser };
+  }
+
+  // Replace an existing image block's media token (e.g. swap the picture in an
+  // already-created image block). Expects an uploaded media token — use
+  // uploadDocMedia or create_doc_block's image_path shortcut to obtain one.
+  async updateDocBlockImage(documentId, blockId, imageToken) {
+    const patch = buildReplaceImagePayload(imageToken);
+    await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${blockId}`,
+      method: 'PATCH',
+      body: patch,
+      sdkFn: () => this.client.docx.documentBlock.patch({
+        path: { document_id: documentId, block_id: blockId },
+        data: patch,
+      }),
+      label: 'updateDocBlockImage',
+    });
+    return { blockId, imageToken };
+  }
+
+  // --- Wiki attach (v1.3.4) ---
+
+  // Move an existing drive resource (docx / bitable / sheet / ...) into a Wiki
+  // space as an 'origin' node. Used by createDoc / createBitable when their
+  // wikiSpaceId option is set.
+  //
+  // Uses wiki/v2/spaces/{space_id}/nodes/move_docs_to_wiki — the documented path
+  // for migrating an existing drive doc into wiki. Note: this endpoint is async;
+  // if the move completes immediately (typical for newly-created docs) we get
+  // back a wiki_token and surface it as node_token. If it's queued we return
+  // { task_id } so the caller can see the async state — we don't currently poll.
+  async attachToWiki(spaceId, objType, objToken, parentNodeToken) {
+    if (!spaceId) throw new Error('attachToWiki: spaceId is required');
+    if (!objType) throw new Error('attachToWiki: objType is required');
+    if (!objToken) throw new Error('attachToWiki: objToken is required');
+    const body = { obj_type: objType, obj_token: objToken, apply: true };
+    if (parentNodeToken) body.parent_wiki_token = parentNodeToken;
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/wiki/v2/spaces/${encodeURIComponent(spaceId)}/nodes/move_docs_to_wiki`,
+      method: 'POST',
+      body,
+      sdkFn: () => this.client.wiki.spaceNode.moveDocsToWiki({ path: { space_id: spaceId }, data: body }),
+      label: 'attachToWiki',
+    });
+    const data = res.data || {};
+    if (data.wiki_token) return { node_token: data.wiki_token, applied: !!data.applied };
+    if (data.task_id) return { task_id: data.task_id, applied: false };
+    return data;
+  }
+
+  // --- OKR (v1.3.4) ---
+
+  async listUserOkrs(userId, { periodIds, offset = 0, limit = 10, lang, userIdType = 'open_id' } = {}) {
+    if (!userId) throw new Error('listUserOkrs: userId is required (the user whose OKRs to read). For your own, get your open_id from get_login_status or search_contacts.');
+    const params = { user_id_type: userIdType, offset: String(offset), limit: String(limit) };
+    if (lang) params.lang = lang;
+    if (periodIds && periodIds.length) params.period_ids = periodIds;
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/okr/v1/users/${encodeURIComponent(userId)}/okrs`,
+      query: params,
+      sdkFn: () => this.client.okr.userOkr.list({
+        path: { user_id: userId },
+        params: {
+          user_id_type: userIdType,
+          offset: String(offset),
+          limit: String(limit),
+          ...(lang ? { lang } : {}),
+          ...(periodIds && periodIds.length ? { period_ids: periodIds } : {}),
+        },
+      }),
+      label: 'listUserOkrs',
+    });
+    return { total: res.data.total, items: res.data.okr_list || [] };
+  }
+
+  async getOkrs(okrIds, { lang, userIdType = 'open_id' } = {}) {
+    if (!Array.isArray(okrIds) || okrIds.length === 0) {
+      throw new Error('getOkrs: okrIds must be a non-empty array');
+    }
+    const params = { user_id_type: userIdType, okr_ids: okrIds };
+    if (lang) params.lang = lang;
+    // UAT REST path takes repeated okr_ids= params; URLSearchParams will serialize an array properly
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/okr/v1/okrs/batch_get`,
+      query: params,
+      sdkFn: () => this.client.okr.okr.batchGet({ params }),
+      label: 'getOkrs',
+    });
+    return { items: res.data.okr_list || [] };
+  }
+
+  async listOkrPeriods({ pageSize = 10, pageToken } = {}) {
+    const params = { page_size: String(pageSize) };
+    if (pageToken) params.page_token = pageToken;
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/okr/v1/periods`,
+      query: params,
+      sdkFn: () => this.client.okr.period.list({ params: { page_size: pageSize, ...(pageToken ? { page_token: pageToken } : {}) } }),
+      label: 'listOkrPeriods',
+    });
+    return { items: res.data.items || [], pageToken: res.data.page_token, hasMore: res.data.has_more };
+  }
+
+  // --- Calendar (v1.3.4) ---
+
+  async listCalendars({ pageSize = 50, pageToken, syncToken } = {}) {
+    // Feishu's calendar/v4/calendars endpoint rejects page_size < 50 with
+    // `99992402 field validation failed` ("the min value is 50"). The docs don't
+    // flag this — smoke-tested against the real API. Clamp to be safe.
+    const ps = Math.max(50, Number(pageSize) || 50);
+    const params = { page_size: String(ps) };
+    if (pageToken) params.page_token = pageToken;
+    if (syncToken) params.sync_token = syncToken;
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/calendar/v4/calendars`,
+      query: params,
+      sdkFn: () => this.client.calendar.calendar.list({ params: { page_size: ps, ...(pageToken ? { page_token: pageToken } : {}), ...(syncToken ? { sync_token: syncToken } : {}) } }),
+      label: 'listCalendars',
+    });
+    return {
+      items: res.data.calendar_list || [],
+      pageToken: res.data.page_token,
+      syncToken: res.data.sync_token,
+      hasMore: res.data.has_more,
+    };
+  }
+
+  async listCalendarEvents(calendarId, { startTime, endTime, pageSize = 50, pageToken, syncToken } = {}) {
+    if (!calendarId) throw new Error('listCalendarEvents: calendarId is required');
+    const params = { page_size: String(pageSize) };
+    if (startTime) params.start_time = String(startTime);
+    if (endTime) params.end_time = String(endTime);
+    if (pageToken) params.page_token = pageToken;
+    if (syncToken) params.sync_token = syncToken;
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events`,
+      query: params,
+      sdkFn: () => this.client.calendar.calendarEvent.list({
+        path: { calendar_id: calendarId },
+        params: {
+          page_size: pageSize,
+          ...(startTime ? { start_time: String(startTime) } : {}),
+          ...(endTime ? { end_time: String(endTime) } : {}),
+          ...(pageToken ? { page_token: pageToken } : {}),
+          ...(syncToken ? { sync_token: syncToken } : {}),
+        },
+      }),
+      label: 'listCalendarEvents',
+    });
+    return {
+      items: res.data.items || [],
+      pageToken: res.data.page_token,
+      syncToken: res.data.sync_token,
+      hasMore: res.data.has_more,
+    };
+  }
+
+  async getCalendarEvent(calendarId, eventId) {
+    if (!calendarId || !eventId) throw new Error('getCalendarEvent: calendarId and eventId are required');
+    const res = await this._asUserOrApp({
+      uatPath: `/open-apis/calendar/v4/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+      sdkFn: () => this.client.calendar.calendarEvent.get({ path: { calendar_id: calendarId, event_id: eventId } }),
+      label: 'getCalendarEvent',
+    });
+    return { event: res.data.event };
   }
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "feishu-user-plugin",
-  "version": "1.3.3",
-  "description": "All-in-one Feishu plugin for Claude Code & Codex — messaging, docs, bitable, wiki, drive. 67 tools + 9 skills, 3 auth layers.",
+  "version": "1.3.4",
+  "description": "All-in-one Feishu plugin for Claude Code & Codex — messaging, docs (with image read/write), bitable, wiki (native + move_docs_to_wiki), drive, OKR, calendar. 74 tools + 9 skills, 3 auth layers.",
   "main": "src/index.js",
   "bin": {
     "feishu-user-plugin": "src/cli.js"
