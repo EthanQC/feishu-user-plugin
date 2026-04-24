@@ -326,7 +326,7 @@ const TOOLS = [
   // ========== IM — Official API (User Identity via UAT) ==========
   {
     name: 'read_p2p_messages',
-    description: '[User UAT] Read P2P (direct message) chat history using user_access_token. Works for chats the bot cannot access. Returns newest messages first by default. Requires OAuth setup.',
+    description: '[User UAT] Read P2P (direct message) chat history using user_access_token. Works for chats the bot cannot access. Returns newest messages first by default. Auto-expands merge_forward messages into their child messages by default — disable with expand_merge_forward=false. Requires OAuth setup.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -335,6 +335,7 @@ const TOOLS = [
         start_time: { type: 'string', description: 'Start timestamp in seconds (optional)' },
         end_time: { type: 'string', description: 'End timestamp in seconds (optional)' },
         sort_type: { type: 'string', enum: ['ByCreateTimeDesc', 'ByCreateTimeAsc'], description: 'Sort order (default: ByCreateTimeDesc = newest first)' },
+        expand_merge_forward: { type: 'boolean', description: 'Auto-expand merge_forward placeholders into their child messages (default true). Children carry parentMessageId; use that id (not the child id) with download_image / download_file.' },
       },
       required: ['chat_id'],
     },
@@ -365,7 +366,7 @@ const TOOLS = [
   },
   {
     name: 'read_messages',
-    description: '[Official API + UAT fallback] Read message history from any group. Accepts oc_xxx ID, numeric ID, or chat name (auto-searched). Auto-falls back to UAT for external groups the bot cannot access. Returns newest messages first by default, with sender names resolved.',
+    description: '[Official API + UAT fallback] Read message history from any group. Accepts oc_xxx ID, numeric ID, or chat name (auto-searched). Auto-falls back to UAT for external groups the bot cannot access. Returns newest messages first by default, with sender names resolved. Auto-expands merge_forward messages into their child messages (with original sender / time / content preserved) by default — disable with expand_merge_forward=false. Text messages have URLs extracted into `urls`; Feishu doc links are additionally surfaced as `feishuDocs` so agents can feed them straight into read_doc / get_doc_blocks.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -374,6 +375,7 @@ const TOOLS = [
         start_time: { type: 'string', description: 'Start timestamp in seconds (optional)' },
         end_time: { type: 'string', description: 'End timestamp in seconds (optional)' },
         sort_type: { type: 'string', enum: ['ByCreateTimeDesc', 'ByCreateTimeAsc'], description: 'Sort order (default: ByCreateTimeDesc = newest first)' },
+        expand_merge_forward: { type: 'boolean', description: 'Auto-expand merge_forward placeholders into their child messages (default true). Children carry parentMessageId; use that id (not the child id) with download_image / download_file.' },
       },
       required: ['chat_id'],
     },
@@ -1013,15 +1015,28 @@ const TOOLS = [
   // ========== Message Resources (Image/File Download) ==========
   {
     name: 'download_image',
-    description: '[User Identity / Official API] Download an image so the model can actually see it. Two modes: (1) message image — pass message_id + image_key from read_messages / read_p2p_messages. (2) docx image — pass doc_token + image_token (the block.image.token from get_doc_blocks). doc_token accepts native document_id, wiki node token, or Feishu URL. Tries user identity first, falls back to app.',
+    description: '[User Identity / Official API] Download an image so the model can actually see it. Two modes: (1) message image — pass message_id + image_key from read_messages / read_p2p_messages. (2) docx image — pass doc_token + image_token (the block.image.token from get_doc_blocks). doc_token accepts native document_id, wiki node token, or Feishu URL. Tries user identity first, falls back to app. NOTE: for merge_forward children, pass the child\'s `parentMessageId` (NOT the child message id) — Feishu keys media by the parent merge_forward id.',
     inputSchema: {
       type: 'object',
       properties: {
-        message_id: { type: 'string', description: 'Message ID (om_xxx) — for mode 1 only' },
+        message_id: { type: 'string', description: 'Message ID (om_xxx) — for mode 1 only. For merge_forward children use the parent merge_forward message id.' },
         image_key: { type: 'string', description: 'Image key (img_xxx) from message content — for mode 1 only' },
         doc_token: { type: 'string', description: 'Document ID, wiki node token, or Feishu URL — for mode 2 only' },
         image_token: { type: 'string', description: 'Image token from a docx image block (block.image.token via get_doc_blocks) — for mode 2 only' },
       },
+    },
+  },
+  {
+    name: 'download_file',
+    description: '[User Identity / Official API] Download a file attached to a message (msg_type=file). Returns base64 bytes + mimeType + filename. Tries user identity first, falls back to app. For merge_forward children, pass the child\'s `parentMessageId` (NOT the child message id) — Feishu keys media by the parent merge_forward id.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message_id: { type: 'string', description: 'Message ID (om_xxx). For merge_forward children use the parent merge_forward message id.' },
+        file_key: { type: 'string', description: 'File key from message content (content.file_key for msg_type=file)' },
+        save_path: { type: 'string', description: 'Optional absolute local path to save the file to. If omitted, file is only returned as inline base64 in the response.' },
+      },
+      required: ['message_id', 'file_key'],
     },
   },
 
@@ -1143,7 +1158,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 
 const text = (s) => ({ content: [{ type: 'text', text: s }] });
-const json = (o) => text(JSON.stringify(o, null, 2));
+const json = (o) => {
+  // If the underlying method surfaced a fallback warning (UAT unavailable,
+  // resource owned by bot), lift it to the top of the response so the human /
+  // agent sees it *before* the structured body. Keeps the JSON payload intact.
+  const warn = o && typeof o === 'object' && o.fallbackWarning ? `${o.fallbackWarning}\n\n` : '';
+  return text(warn + JSON.stringify(o, null, 2));
+};
 const sendResult = (r, desc) => text(r.success ? desc : `Send failed (status: ${r.status})`);
 
 // Resolver helper: turn document_id / app_token / wiki node / Feishu URL into
@@ -1288,7 +1309,17 @@ async function handleTool(name, args) {
           parts.push(`App credentials: INVALID — app_id=${probe.appId} rejected by Feishu (${probe.error})`);
           parts.push(`  → Likely wrong/stale APP_ID. Re-run the install prompt from team-skills/plugins/feishu-user-plugin/README.md to get the correct credentials.`);
         }
-        parts.push(`User access token: ${official.hasUAT ? 'Configured (P2P reading enabled)' : 'Not set (optional — needed for P2P chat reading. Run OAuth flow to obtain, see README for details)'}`);
+        if (official.hasUAT) {
+          try {
+            await official.listChatsAsUser({ pageSize: 1 });
+            parts.push('User access token: Valid (P2P/group UAT reading enabled)');
+          } catch (e) {
+            parts.push(`User access token: INVALID — ${e.message}`);
+            parts.push('  → Re-run OAuth: npx feishu-user-plugin oauth, then restart Claude Code / Codex so running MCP servers load the new token.');
+          }
+        } else {
+          parts.push('User access token: Not set (optional — needed for P2P chat reading. Run OAuth flow to obtain, see README for details)');
+        }
       }
       return text(parts.join('\n'));
     }
@@ -1324,6 +1355,7 @@ async function handleTool(name, args) {
       return json(await official.readMessagesAsUser(chatId, {
         pageSize: args.page_size, startTime: args.start_time, endTime: args.end_time,
         sortType: args.sort_type,
+        expandMergeForward: args.expand_merge_forward !== false,
       }, uc));
     }
     case 'list_user_chats':
@@ -1335,7 +1367,11 @@ async function handleTool(name, args) {
       return json(await getOfficialClient().listChats({ pageSize: args.page_size, pageToken: args.page_token }));
     case 'read_messages': {
       const official = getOfficialClient();
-      const msgOpts = { pageSize: args.page_size, startTime: args.start_time, endTime: args.end_time, sortType: args.sort_type };
+      const msgOpts = {
+        pageSize: args.page_size, startTime: args.start_time, endTime: args.end_time,
+        sortType: args.sort_type,
+        expandMergeForward: args.expand_merge_forward !== false,
+      };
       // Get userClient for name resolution fallback (best-effort)
       let uc = null;
       try { uc = await getUserClient(); } catch (_) {}
@@ -1382,7 +1418,8 @@ async function handleTool(name, args) {
         : r.wikiAttachTaskId ? ` [wiki attach queued — task_id: ${r.wikiAttachTaskId}]`
         : r.wikiAttachError ? ` [WARNING: wiki attach failed — ${r.wikiAttachError}. Doc exists in drive root/folder.]`
         : '';
-      return text(`Document created${ownership}: ${r.documentId}${wikiNote}`);
+      const warn = r.fallbackWarning ? `\n\n${r.fallbackWarning}` : '';
+      return text(`Document created${ownership}: ${r.documentId}${wikiNote}${warn}`);
     }
 
     // --- Official API: Bitable ---
@@ -1397,12 +1434,16 @@ async function handleTool(name, args) {
         : r.wikiAttachTaskId ? `\nWiki attach queued — task_id: ${r.wikiAttachTaskId}`
         : r.wikiAttachError ? `\nWARNING: wiki attach failed — ${r.wikiAttachError}. Bitable exists in drive root/folder.`
         : '';
-      return text(`Bitable created${ownership}: ${r.appToken}\nURL: ${r.url || ''}${wikiNote}`);
+      const warn = r.fallbackWarning ? `\n\n${r.fallbackWarning}` : '';
+      return text(`Bitable created${ownership}: ${r.appToken}\nURL: ${r.url || ''}${wikiNote}${warn}`);
     }
     case 'list_bitable_tables':
       return json(await getOfficialClient().listBitableTables(await resolveDocId(args.app_token)));
-    case 'create_bitable_table':
-      return text(`Table created: ${(await getOfficialClient().createBitableTable(await resolveDocId(args.app_token), args.name, args.fields)).tableId}`);
+    case 'create_bitable_table': {
+      const r = await getOfficialClient().createBitableTable(await resolveDocId(args.app_token), args.name, args.fields);
+      const warn = r.fallbackWarning ? `\n\n${r.fallbackWarning}` : '';
+      return text(`Table created: ${r.tableId}${warn}`);
+    }
     case 'list_bitable_fields':
       return json(await getOfficialClient().listBitableFields(await resolveDocId(args.app_token), args.table_id));
     case 'create_bitable_field': {
@@ -1450,7 +1491,8 @@ async function handleTool(name, args) {
     case 'create_folder': {
       const r = await getOfficialClient().createFolder(args.name, args.parent_token);
       const ownership = r.viaUser ? ' (as user)' : ' (as app — UAT unavailable or failed; folder owned by the app, not you)';
-      return text(`Folder created${ownership}: ${r.token}`);
+      const warn = r.fallbackWarning ? `\n\n${r.fallbackWarning}` : '';
+      return text(`Folder created${ownership}: ${r.token}${warn}`);
     }
 
     // --- Official API: Contact ---
@@ -1588,6 +1630,33 @@ async function handleTool(name, args) {
         content: [
           { type: 'text', text: `Image downloaded from ${source} (${r.viaUser ? 'as user' : 'as app'}, ${r.bytes} bytes, ${r.mimeType}):` },
           { type: 'image', data: r.base64, mimeType: r.mimeType },
+        ],
+      };
+    }
+
+    case 'download_file': {
+      if (!args.message_id || !args.file_key) {
+        return text('download_file requires message_id + file_key. For merge_forward children pass the PARENT merge_forward message id, not the child id.');
+      }
+      const r = await getOfficialClient().downloadMessageResource(args.message_id, args.file_key, 'file');
+      let saveNote = '';
+      if (args.save_path) {
+        try {
+          const fs = require('fs');
+          fs.writeFileSync(args.save_path, Buffer.from(r.base64, 'base64'));
+          saveNote = `\nSaved to: ${args.save_path}`;
+        } catch (e) {
+          saveNote = `\nSave to ${args.save_path} failed: ${e.message}`;
+        }
+      }
+      // Files are returned as a text summary plus a resource link so agents can
+      // either read the saved copy or decode the base64 themselves. We do not
+      // embed binary file content as MCP image blobs (wrong content-type).
+      const summary = `File downloaded from message ${args.message_id} (${r.viaUser ? 'as user' : 'as app'}, ${r.bytes} bytes, ${r.mimeType})${saveNote}`;
+      return {
+        content: [
+          { type: 'text', text: summary },
+          { type: 'text', text: `base64 (${r.bytes} bytes, truncated display):\n${r.base64.slice(0, 400)}${r.base64.length > 400 ? '…' : ''}` },
         ],
       };
     }

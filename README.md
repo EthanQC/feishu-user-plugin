@@ -6,7 +6,7 @@
 [![Tools](https://img.shields.io/badge/Tools-74-orange.svg)](#tools)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**All-in-one Feishu/Lark MCP Server -- 74 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, OKR, and more.**
+**All-in-one Feishu/Lark MCP Server -- 75 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, OKR, and more.**
 
 The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API. Works with Claude Code, Cursor, Windsurf, OpenClaw, and any MCP-compatible client.
 
@@ -337,7 +337,7 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-## Tools (74 total)
+## Tools (75 total)
 
 ### User Identity -- Messaging (8 tools, cookie auth)
 
@@ -390,7 +390,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 | `add_members` | Add users to a group |
 | `remove_members` | Remove users from a group |
 | `upload_image` / `upload_file` | Upload image/file, returns key for sending |
-| `download_image` | Download a chat-message image (message_id + image_key) OR a docx image (image_token + optional doc_token). Returned as MCP image content. |
+| `download_image` | Download a chat-message image (message_id + image_key) OR a docx image (image_token + optional doc_token). Returned as MCP image content. For merge_forward children, use the child's `parentMessageId`, not the child id. |
+| `download_file` | Download a file attachment (msg_type=file). Returns base64 + mimeType + byte count; optional `save_path` writes to disk. Same parent-id rule for merge_forward children. (v1.3.5) |
 
 ### Wiki, OKR, and Calendar (v1.3.4)
 
@@ -508,9 +509,11 @@ Skills are automatically available when the plugin is installed.
 |------------|-------|----------|---------|
 | Cookie | `sl_session` | 12h max-age | Auto-refreshed every 4h via heartbeat |
 | App Token | `tenant_access_token` | 2h | Auto-managed by SDK |
-| User OAuth | `user_access_token` | ~2h | Auto-refreshed via `refresh_token`, saved to `.env` |
+| User OAuth | `user_access_token` | ~2h | Auto-refreshed via `refresh_token`, saved to MCP config |
 
 When the cookie expires (after ~12-24h without heartbeat), re-login at feishu.cn and update `LARK_COOKIE`. Use `get_login_status` to check health proactively.
+
+If UAT refresh fails with `invalid_grant`, re-run `npx feishu-user-plugin oauth` and restart Claude Code / Codex. v1.3.5+ also re-reads the persisted MCP config before refreshing, so duplicate MCP processes can adopt a token already rotated by another process instead of retrying a stale refresh token.
 
 ## Project Structure
 
@@ -523,7 +526,7 @@ feishu-user-plugin/
 │       ├── SKILL.md         # Main skill definition (trigger, tools, auth)
 │       └── references/      # 8 skill reference docs + CLAUDE.md
 ├── src/
-│   ├── index.js             # MCP server entry point (74 tools)
+│   ├── index.js             # MCP server entry point (75 tools)
 │   ├── client.js            # User identity client (Protobuf gateway)
 │   ├── official.js          # Official API client (REST, UAT)
 │   ├── utils.js             # ID generators, cookie parser

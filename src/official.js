@@ -34,7 +34,7 @@ class LarkOfficialClient {
     if (token) {
       this._uat = token;
       this._uatRefresh = refresh || null;
-      this._uatExpires = expires;
+      this._uatExpires = expires || this._decodeTokenExpiry(token);
     }
   }
 
@@ -90,6 +90,7 @@ class LarkOfficialClient {
     if (!this._uat) throw new Error('No user_access_token. Run: npx feishu-user-plugin oauth');
 
     const now = Math.floor(Date.now() / 1000);
+    if (!this._uatExpires) this._uatExpires = this._decodeTokenExpiry(this._uat);
     // Proactively refresh if we know it's expiring within 5 min
     if (this._uatExpires > 0 && this._uatExpires <= now + 300) {
       return this._refreshUAT();
@@ -97,30 +98,125 @@ class LarkOfficialClient {
     return this._uat;
   }
 
+  _decodeTokenExpiry(token) {
+    try {
+      const payload = token?.split('.')?.[1];
+      if (!payload) return 0;
+      const data = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      return typeof data.exp === 'number' ? data.exp : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  _adoptPersistedUATIfNewer() {
+    try {
+      const { readCredentials } = require('./config');
+      const creds = readCredentials();
+      const token = creds.LARK_USER_ACCESS_TOKEN;
+      const refresh = creds.LARK_USER_REFRESH_TOKEN;
+      if (!token && !refresh) return false;
+
+      const expires = parseInt(creds.LARK_UAT_EXPIRES || '0') || this._decodeTokenExpiry(token);
+      const changed = (token && token !== this._uat)
+        || (refresh && refresh !== this._uatRefresh)
+        || (expires && expires !== this._uatExpires);
+      if (!changed) return false;
+
+      if (token) this._uat = token;
+      if (refresh) this._uatRefresh = refresh;
+      this._uatExpires = expires || 0;
+      console.error('[feishu-user-plugin] UAT adopted latest persisted token before refresh');
+      return true;
+    } catch (e) {
+      console.error(`[feishu-user-plugin] UAT persisted-token check failed: ${e.message}`);
+      return false;
+    }
+  }
+
+  // Cross-process advisory lock for UAT refresh. Feishu rotates the refresh_token
+  // on every refresh (old one invalidated instantly). When multiple MCP server
+  // processes share the same persisted refresh_token and all wake up near expiry,
+  // they race: the first wins, the rest see `invalid_grant` and can't recover.
+  // This lock serialises refreshes across processes; inside the critical section
+  // we also re-read the persisted config so late arrivals adopt the winner's
+  // token instead of attempting a doomed refresh with the already-rotated one.
+  _uatLockPath() {
+    const path = require('path');
+    const os = require('os');
+    return path.join(os.homedir(), '.claude', 'feishu-uat-refresh.lock');
+  }
+
+  async _acquireRefreshLock(lockPath, { staleMs = 30000, pollMs = 200, timeoutMs = 20000 } = {}) {
+    const fs = require('fs');
+    const path = require('path');
+    try { fs.mkdirSync(path.dirname(lockPath), { recursive: true }); } catch (_) {}
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      try {
+        const fd = fs.openSync(lockPath, 'wx'); // O_CREAT | O_EXCL
+        fs.writeSync(fd, `${process.pid}\n${Date.now()}\n`);
+        fs.closeSync(fd);
+        return true;
+      } catch (e) {
+        if (e.code !== 'EEXIST') throw e;
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > staleMs) {
+            try { fs.unlinkSync(lockPath); } catch (_) {}
+            continue;
+          }
+        } catch (_) { /* lock vanished under us — retry */ }
+        await new Promise(r => setTimeout(r, pollMs));
+      }
+    }
+    return false;
+  }
+
+  _releaseRefreshLock(lockPath) {
+    try { require('fs').unlinkSync(lockPath); } catch (_) {}
+  }
+
   async _refreshUAT() {
-    if (!this._uatRefresh) throw new Error('UAT expired and no refresh token. Run: npx feishu-user-plugin oauth');
+    const lockPath = this._uatLockPath();
+    const acquired = await this._acquireRefreshLock(lockPath);
+    if (!acquired) {
+      console.error('[feishu-user-plugin] UAT refresh lock timed out; proceeding without mutual exclusion');
+    }
+    try {
+      // Re-check under lock: another process may have already refreshed and
+      // persisted a new token while we waited. If so, adopt and skip the refresh.
+      const now = Math.floor(Date.now() / 1000);
+      if (this._adoptPersistedUATIfNewer() && this._uatExpires > now + 300) {
+        return this._uat;
+      }
 
-    const res = await fetchWithTimeout('https://open.feishu.cn/open-apis/authen/v2/oauth/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        grant_type: 'refresh_token',
-        client_id: this.appId,
-        client_secret: this.appSecret,
-        refresh_token: this._uatRefresh,
-      }),
-    });
-    const data = await res.json();
-    const tokenData = data.access_token ? data : data.data;
-    if (!tokenData?.access_token) throw new Error(`UAT refresh failed: ${JSON.stringify(data)}. Run: npx feishu-user-plugin oauth`);
+      if (!this._uatRefresh) throw new Error('UAT expired and no refresh token. Run: npx feishu-user-plugin oauth');
 
-    this._uat = tokenData.access_token;
-    this._uatRefresh = tokenData.refresh_token || this._uatRefresh;
-    const expiresIn = typeof tokenData.expires_in === 'number' && tokenData.expires_in > 0 ? tokenData.expires_in : 7200;
-    this._uatExpires = Math.floor(Date.now() / 1000) + expiresIn;
-    this._persistUAT();
-    console.error('[feishu-user-plugin] UAT refreshed successfully');
-    return this._uat;
+      const res = await fetchWithTimeout('https://open.feishu.cn/open-apis/authen/v2/oauth/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          client_id: this.appId,
+          client_secret: this.appSecret,
+          refresh_token: this._uatRefresh,
+        }),
+      });
+      const data = await res.json();
+      const tokenData = data.access_token ? data : data.data;
+      if (!tokenData?.access_token) throw new Error(`UAT refresh failed: ${JSON.stringify(data)}. Run: npx feishu-user-plugin oauth`);
+
+      this._uat = tokenData.access_token;
+      this._uatRefresh = tokenData.refresh_token || this._uatRefresh;
+      const expiresIn = typeof tokenData.expires_in === 'number' && tokenData.expires_in > 0 ? tokenData.expires_in : 7200;
+      this._uatExpires = Math.floor(Date.now() / 1000) + expiresIn;
+      this._persistUAT();
+      console.error('[feishu-user-plugin] UAT refreshed successfully');
+      return this._uat;
+    } finally {
+      if (acquired) this._releaseRefreshLock(lockPath);
+    }
   }
 
   _persistUAT() {
@@ -210,7 +306,17 @@ class LarkOfficialClient {
     }
     try {
       const appData = await this._safeSDKCall(sdkFn, label);
-      if (appData && typeof appData === 'object') appData._viaUser = false;
+      if (appData && typeof appData === 'object') {
+        appData._viaUser = false;
+        // Attach a warning when we silently fell back to bot identity. This lets
+        // write handlers surface "⚠️ created as BOT, not you" so the user doesn't
+        // discover it days later when a teammate can read the "private" resource.
+        if (uatSummary) {
+          appData._fallbackWarning = `⚠️  UAT 不可用 (${uatSummary}),本次操作以 bot 身份执行。资源归属于共享 bot「Claude聊天助手」,不是你。恢复方法:运行 \`npx feishu-user-plugin oauth\` 后重启 Claude Code / Codex。`;
+        } else if (!this.hasUAT) {
+          appData._fallbackWarning = `⚠️  未配置 UAT,本次操作以 bot 身份执行。资源归属于共享 bot「Claude聊天助手」,不是你。想让资源归你所有,先跑 \`npx feishu-user-plugin oauth\` 然后重启 Claude Code / Codex。`;
+        }
+      }
       return appData;
     } catch (appErr) {
       if (uatSummary) {
@@ -236,7 +342,7 @@ class LarkOfficialClient {
     return { items: data.data.items || [], pageToken: data.data.page_token, hasMore: data.data.has_more };
   }
 
-  async readMessagesAsUser(chatId, { pageSize = 20, startTime, endTime, pageToken, sortType = 'ByCreateTimeDesc' } = {}, userClient) {
+  async readMessagesAsUser(chatId, { pageSize = 20, startTime, endTime, pageToken, sortType = 'ByCreateTimeDesc', expandMergeForward = true } = {}, userClient) {
     // Feishu API requires end_time >= start_time; auto-set end_time to now if missing
     if (startTime && !endTime) {
       endTime = String(Math.floor(Date.now() / 1000));
@@ -257,6 +363,7 @@ class LarkOfficialClient {
     if (data.code !== 0) throw new Error(`readMessagesAsUser failed (${data.code}): ${data.msg}`);
     const items = (data.data.items || []).map(m => this._formatMessage(m));
     await this._populateSenderNames(items, userClient);
+    if (expandMergeForward) await this._expandMergeForwardItems(items, userClient, { preferUAT: true });
     return { items, hasMore: data.data.has_more, pageToken: data.data.page_token };
   }
 
@@ -270,7 +377,7 @@ class LarkOfficialClient {
     return { items: res.data.items || [], pageToken: res.data.page_token, hasMore: res.data.has_more };
   }
 
-  async readMessages(chatId, { pageSize = 20, startTime, endTime, pageToken, sortType = 'ByCreateTimeDesc' } = {}, userClient) {
+  async readMessages(chatId, { pageSize = 20, startTime, endTime, pageToken, sortType = 'ByCreateTimeDesc', expandMergeForward = true } = {}, userClient) {
     const params = { container_id_type: 'chat', container_id: chatId, page_size: pageSize, sort_type: sortType };
     if (startTime) params.start_time = startTime;
     if (endTime) params.end_time = endTime;
@@ -278,6 +385,7 @@ class LarkOfficialClient {
     const res = await this._safeSDKCall(() => this.client.im.message.list({ params }), 'readMessages');
     const items = (res.data.items || []).map(m => this._formatMessage(m));
     await this._populateSenderNames(items, userClient);
+    if (expandMergeForward) await this._expandMergeForwardItems(items, userClient, { preferUAT: false });
     return { items, hasMore: res.data.has_more, pageToken: res.data.page_token };
   }
 
@@ -562,7 +670,7 @@ class LarkOfficialClient {
       label: 'createDoc',
     });
     const documentId = res.data.document?.document_id;
-    const out = { documentId, viaUser: !!res._viaUser };
+    const out = { documentId, viaUser: !!res._viaUser, fallbackWarning: res._fallbackWarning || null };
     if (documentId && wikiSpaceId) {
       try {
         const node = await this.attachToWiki(wikiSpaceId, 'docx', documentId, wikiParentNodeToken);
@@ -598,7 +706,7 @@ class LarkOfficialClient {
       }),
       label: 'createDocBlock',
     });
-    return { blocks: res.data.children || [] };
+    return { blocks: res.data.children || [], fallbackWarning: res._fallbackWarning || null };
   }
 
   async updateDocBlock(documentId, blockId, updateBody) {
@@ -653,7 +761,7 @@ class LarkOfficialClient {
       label: 'createBitable',
     });
     const appToken = res.data.app?.app_token;
-    const out = { appToken, name: res.data.app?.name, url: res.data.app?.url, viaUser: !!res._viaUser };
+    const out = { appToken, name: res.data.app?.name, url: res.data.app?.url, viaUser: !!res._viaUser, fallbackWarning: res._fallbackWarning || null };
     if (appToken && wikiSpaceId) {
       try {
         const node = await this.attachToWiki(wikiSpaceId, 'bitable', appToken, wikiParentNodeToken);
@@ -686,7 +794,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.appTable.create({ path: { app_token: appToken }, data }),
       label: 'createTable',
     });
-    return { tableId: res.data.table_id };
+    return { tableId: res.data.table_id, fallbackWarning: res._fallbackWarning || null };
   }
 
   async listBitableFields(appToken, tableId) {
@@ -706,7 +814,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.appTableField.create({ path: { app_token: appToken, table_id: tableId }, data: fieldConfig }),
       label: 'createField',
     });
-    return { field: res.data.field };
+    return { field: res.data.field, fallbackWarning: res._fallbackWarning || null };
   }
 
   async updateBitableField(appToken, tableId, fieldId, fieldConfig) {
@@ -760,7 +868,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.appTableRecord.create({ path: { app_token: appToken, table_id: tableId }, data: { fields } }),
       label: 'createRecord',
     });
-    return { recordId: res.data.record?.record_id };
+    return { recordId: res.data.record?.record_id, fallbackWarning: res._fallbackWarning || null };
   }
 
   async updateBitableRecord(appToken, tableId, recordId, fields) {
@@ -792,7 +900,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.appTableRecord.batchCreate({ path: { app_token: appToken, table_id: tableId }, data: { records } }),
       label: 'batchCreateRecords',
     });
-    return { records: res.data.records || [] };
+    return { records: res.data.records || [], fallbackWarning: res._fallbackWarning || null };
   }
 
   async batchUpdateBitableRecords(appToken, tableId, records) {
@@ -874,7 +982,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.appTableView.create({ path: { app_token: appToken, table_id: tableId }, data: { view_name: viewName, view_type: viewType } }),
       label: 'createView',
     });
-    return { view: res.data.view };
+    return { view: res.data.view, fallbackWarning: res._fallbackWarning || null };
   }
 
   async deleteBitableView(appToken, tableId, viewId) {
@@ -897,7 +1005,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.bitable.app.copy({ path: { app_token: appToken }, data }),
       label: 'copyBitable',
     });
-    return { app: res.data.app };
+    return { app: res.data.app, fallbackWarning: res._fallbackWarning || null };
   }
 
   // --- Wiki ---
@@ -952,7 +1060,7 @@ class LarkOfficialClient {
       sdkFn: () => this.client.drive.file.createFolder({ data: body }),
       label: 'createFolder',
     });
-    return { token: res.data.token, viaUser: !!res._viaUser };
+    return { token: res.data.token, viaUser: !!res._viaUser, fallbackWarning: res._fallbackWarning || null };
   }
 
   // --- Drive: File Operations ---
@@ -1110,7 +1218,106 @@ class LarkOfficialClient {
       updateTime: this._normalizeTimestamp(m.update_time),
     };
     if (Array.isArray(m.mentions) && m.mentions.length > 0) out.mentions = m.mentions;
+    if (m.upper_message_id) out.upperMessageId = m.upper_message_id;
+    if (m.root_id) out.rootId = m.root_id;
+    if (m.parent_id) out.parentId = m.parent_id;
+    // Extract URL-like strings from text bodies so agents can call WebFetch /
+    // read_doc / get_doc_blocks without having to regex the body themselves.
+    if (out.msgType === 'text' && typeof body?.text === 'string') {
+      const urls = body.text.match(/https?:\/\/[^\s一-鿿]+/g);
+      if (urls && urls.length > 0) {
+        out.urls = Array.from(new Set(urls));
+        const feishuDocs = out.urls.filter(u =>
+          /feishu\.cn\/(?:docx|wiki|base|sheets|docs|mindnotes)\//i.test(u));
+        if (feishuDocs.length > 0) out.feishuDocs = feishuDocs;
+      }
+    }
     return out;
+  }
+
+  // Fetch the child messages inside a merge_forward parent. Feishu exposes them
+  // via `/im/v1/messages/{parent_id}` (single-message GET). The response is
+  // actually a list: items[0] is the parent merge_forward placeholder,
+  // items[1..N] are the children carrying `upper_message_id` pointing back to
+  // the parent and `chat_id` pointing to their ORIGIN chat (the one being
+  // forwarded from, not where the merge_forward was posted).
+  //
+  // Media resources (image_key / file_key) on children must be downloaded
+  // using the PARENT message id — a Feishu quirk: downloading with the child
+  // id returns "File not in msg".
+  async readMergeForwardChildren(parentMessageId, userClient, { preferUAT = true } = {}) {
+    const url = `https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(parentMessageId)}`;
+
+    const tryPath = async (bearer) => {
+      const res = await fetchWithTimeout(url, {
+        headers: { 'Authorization': `Bearer ${bearer}` },
+        timeoutMs: 30000,
+      });
+      return res.json();
+    };
+
+    let data = null;
+    const order = preferUAT ? ['uat', 'bot'] : ['bot', 'uat'];
+    const errors = [];
+    for (const identity of order) {
+      try {
+        if (identity === 'uat') {
+          if (!this.hasUAT) { errors.push('uat: not configured'); continue; }
+          const uat = await this._getValidUAT();
+          const resp = await tryPath(uat);
+          if (resp.code === 0) { data = resp; break; }
+          errors.push(`uat: code=${resp.code} msg=${resp.msg}`);
+        } else {
+          const tat = await this._getAppToken();
+          const resp = await tryPath(tat);
+          if (resp.code === 0) { data = resp; break; }
+          errors.push(`bot: code=${resp.code} msg=${resp.msg}`);
+        }
+      } catch (e) {
+        errors.push(`${identity}: ${e.message}`);
+      }
+    }
+    if (!data) {
+      throw new Error(`readMergeForwardChildren failed: ${errors.join(' | ')}`);
+    }
+
+    // items[0] is the parent itself — filter it out. The rest are children.
+    const rawChildren = (data.data?.items || []).filter(m =>
+      m.message_id !== parentMessageId && m.upper_message_id);
+
+    const children = rawChildren.map(raw => {
+      const f = this._formatMessage(raw);
+      // Surface the parent id on the child so downstream tools (download_image /
+      // download_file) know which id to pass to Feishu's resource endpoint.
+      f.parentMessageId = parentMessageId;
+      // Mark the origin chat explicitly — child.chatId is the ORIGINAL chat the
+      // message came from, not the chat where the merge_forward was posted.
+      f.originChatId = raw.chat_id;
+      return f;
+    });
+    await this._populateSenderNames(children, userClient);
+    return children;
+  }
+
+  // Expand merge_forward placeholders in-place. Adds `children: [...]` or
+  // `expandError` on each merge_forward item. `depth` guards against nesting
+  // (Feishu does allow nested merge_forward, but we cap at 1 level to avoid
+  // exponential fan-out in agent contexts).
+  async _expandMergeForwardItems(items, userClient, { preferUAT = true, depth = 0, maxDepth = 1 } = {}) {
+    if (!items || depth >= maxDepth) return;
+    for (const m of items) {
+      if (m.msgType !== 'merge_forward') continue;
+      try {
+        const children = await this.readMergeForwardChildren(m.messageId, userClient, { preferUAT });
+        m.children = children;
+        // One extra level deep if user really wants, via recursive call.
+        if (depth + 1 < maxDepth) {
+          await this._expandMergeForwardItems(children, userClient, { preferUAT, depth: depth + 1, maxDepth });
+        }
+      } catch (e) {
+        m.expandError = e.message;
+      }
+    }
   }
 
   _normalizeTimestamp(ts) {
@@ -1335,6 +1542,7 @@ class LarkOfficialClient {
     // Step 2 — upload (if needed).
     let finalToken = imageToken;
     let viaUser = !!created._viaUser;
+    let fallbackWarning = created._fallbackWarning || null;
     if (!finalToken) {
       const uploaded = await this.uploadDocMedia(imagePath, blockId, 'docx_image');
       finalToken = uploaded.fileToken;
@@ -1354,7 +1562,7 @@ class LarkOfficialClient {
       label: 'createDocBlockWithImage.replaceImage',
     });
 
-    return { blockId, imageToken: finalToken, viaUser };
+    return { blockId, imageToken: finalToken, viaUser, fallbackWarning };
   }
 
   // Replace an existing image block's media token (e.g. swap the picture in an

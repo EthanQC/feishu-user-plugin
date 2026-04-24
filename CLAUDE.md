@@ -6,7 +6,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories (74 tools)
+## Tool Categories (75 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
 - `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
@@ -32,7 +32,7 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **All docx + bitable + drive create/read/write tools are UAT-first**: when UAT is configured, every operation (create/edit/delete doc blocks, bitable tables/fields/views/records, drive folders) tries the user's token first and falls back to app token on failure. This keeps resources consistently owned by the user and avoids 403 errors when the app can't access user-created resources. Read-only tools (e.g. `read_doc`, `get_doc_blocks`, `list_bitable_tables`) are also UAT-first so user-owned resources remain readable.
 
 ### Official API Tools (app credentials)
-- `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, oc_ ID, or numeric ID; auto-resolves via bot's group list → im.chat.search → search_contacts). **Auto-falls back to UAT for external groups the bot cannot access.** Returns newest messages first by default. Messages include sender names.
+- `list_chats` / `read_messages` — Chat history (read_messages accepts chat name, oc_ ID, or numeric ID; auto-resolves via bot's group list → im.chat.search → search_contacts). **Auto-falls back to UAT for external groups the bot cannot access.** Returns newest messages first by default. Messages include sender names. **v1.3.5**: `merge_forward` messages now auto-expand into their child messages (2 images + 4 texts, with original sender / time / origin chat preserved); text messages get `urls[]` + `feishuDocs[]` extracted so agents can feed them straight into `read_doc` / WebFetch. Disable expansion with `expand_merge_forward=false`.
 - `send_message_as_bot` — Bot sends message to any chat (text, post, interactive, etc.)
 - `reply_message` / `forward_message` — Message operations (as bot)
 - `delete_message` / `update_message` — Recall or edit bot's own messages
@@ -52,7 +52,8 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `list_files` / `create_folder` — Drive
 - `copy_file` / `move_file` / `delete_file` — Drive file operations (copy, move, delete)
 - `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
-- `download_image` — Download an image and return it as MCP image content so the model **sees the pixels**. Two modes: (1) **message image** — pass `message_id` + `image_key` from read_messages. (2) **docx image** — pass `image_token` (from `get_doc_blocks` image block) and optionally `doc_token` (native id / wiki node / Feishu URL). Tries UAT first, falls back to app token.
+- `download_image` — Download an image and return it as MCP image content so the model **sees the pixels**. Two modes: (1) **message image** — pass `message_id` + `image_key` from read_messages. (2) **docx image** — pass `image_token` (from `get_doc_blocks` image block) and optionally `doc_token` (native id / wiki node / Feishu URL). Tries UAT first, falls back to app token. **merge_forward children**: use the child's `parentMessageId` (NOT the child id) — Feishu returns `File not in msg` with the child id.
+- `download_file` — Download a file (msg_type=file) attachment. Returns base64 + mimeType + byte count; optional `save_path` writes the file to disk. Same parent-id rule for merge_forward children as download_image.
 - `list_user_okrs` / `get_okrs` / `list_okr_periods` — OKR read. UAT-first (works for the authenticated user's OKRs) with app fallback when OKR scope is granted.
 - `list_calendars` / `list_calendar_events` / `get_calendar_event` — Calendar read. UAT-first (primary + shared + subscribed); app identity only sees calendars the bot was explicitly invited to.
 - `find_user` — Contact lookup by email/mobile
@@ -307,7 +308,22 @@ Two known root causes, both fixed in v1.3.3:
 ### If UAT refresh fails with "invalid_grant"
 - The refresh token has expired or been revoked — auto-refresh cannot recover this
 - **Fix**: Re-run OAuth: `npx feishu-user-plugin oauth`
-- Then restart Claude Code
+- Then restart Claude Code / Codex so running MCP server processes load the new token
+- **v1.3.5+ hardening** (no manual action required, fixes the common case):
+  - Cross-process file lock at `~/.claude/feishu-uat-refresh.lock` (`O_CREAT|O_EXCL`, 30 s stale detection) — at most one MCP process refreshes at a time.
+  - Inside the critical section the lock holder re-reads `~/.claude.json` to see if a peer already rotated the token; if so, it adopts the fresh token instead of consuming an already-invalidated refresh token.
+  - This closes the "Codex spawned 6 MCP servers, all shared the same refresh_token, all raced to refresh" failure mode observed on 2026-04-23.
+  - `get_login_status` now does a real UAT health check (calls `listChatsAsUser({pageSize:1})`) — no more "token configured but actually 401" surprises.
+
+### If multiple MCP server processes keep spawning
+- Observed on Codex + Claude Code when the client respawns the server for each tool session without cleaning up the previous one. 6 concurrent `src/index.js` processes is not unusual under heavy use.
+- v1.3.5 neutralises the damage (UAT refresh serialised via file lock) but the stale processes still consume memory.
+- **Manual cleanup when you notice**: `pkill -f 'feishu-user-plugin/src/index.js'` — the client will respawn one fresh process on the next tool call.
+
+### If a create_* tool warns "UAT failed, created as BOT"
+- v1.3.5 added an explicit `⚠️` warning to MCP responses whenever `_asUserOrApp` silently fell back to bot identity for a write (create_doc / create_bitable / create_folder / create_doc_block / ...). Before v1.3.5 this was silent and led to the "teammate can read my 'private' doc" issue.
+- **Cause**: your UAT is failing (expired / scope missing / race) so the plugin reached for bot credentials. The resulting resource is owned by the shared bot, tenant-readable by default, NOT by you.
+- **Fix**: run `npx feishu-user-plugin oauth` and restart Claude Code / Codex. If the resource needs to be yours, delete the bot-owned copy and recreate after UAT is valid.
 
 ### If OAuth fails with "Missing LARK_APP_ID"
 - `oauth.js` reads credentials from `~/.claude.json` MCP config (not .env)

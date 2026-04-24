@@ -69,72 +69,63 @@
 - [x] fix: 无 UAT 时不再直接抛 Feishu 原始 payload，改为指向 `npx feishu-user-plugin oauth` 的清晰错误信息
 - [x] fix: `_uatREST` 支持数组 query 参数（OKR `period_ids`、`okr_ids` 等需要重复 key）
 
-## v1.3.5 — 计划中
+### v1.3.5 — UAT race 硬化 + Fallback 告警 + merge_forward 展开
 
-### 本地 md → 飞书知识库同步（从 v1.3.4 拆出）
-- [ ] md parser 依赖选型（remark / markdown-it / unified）
-- [ ] `src/doc-blocks.js` 补齐 heading / bullet / ordered / code / quote / divider / table / todo / callout 构造器
-- [ ] wikilink `[[page]]` 解析：按 md 文件名 / 标题 / 用户自定义 mapping 三级策略
-- [ ] 图片内联：md `![alt](./img.png)` → 复用 v1.3.4 的 `uploadDocMedia` + `image_path` 快捷
-- [ ] CLI 子命令 `sync-md <path>` vs MCP 工具 `sync_markdown_to_wiki` 取舍
-- [ ] 增量 diff：已存在 wiki 节点的更新策略（全量覆盖 / 按 block_id 精细 diff）
+- [x] fix: UAT refresh 跨进程文件锁（`~/.claude/feishu-uat-refresh.lock`，O_CREAT|O_EXCL，30s stale detection）。多 MCP 进程并发刷新时严格串行化，进入临界区后再重读已持久化配置；后到的进程 adopt 胜者的新 token,不重复消耗已轮换的 refresh token
+- [x] fix: UAT refresh 前重读已持久化配置（JWT exp 解析 + `_adoptPersistedUATIfNewer` 双层保险）
+- [x] fix: `get_login_status` 真调一次 `listChatsAsUser` 验证 UAT,不再只报告 token 已配置
+- [x] feat: `_asUserOrApp` 静默 fallback 到 bot 写操作时返回 `fallbackWarning`,handler 在 MCP 响应里以 ⚠️ 显式提示"资源归属 bot 不是你,跑 oauth 然后重启"
+- [x] feat: `read_messages` / `read_p2p_messages` 自动展开 `merge_forward` 占位。通过 `GET /im/v1/messages/{parent_id}` 拉子消息数组,子消息挂 `parentMessageId` / `originChatId` / `upperMessageId`,保留原始 sender / time
+- [x] feat: `read_messages` 文本消息自动抽取 `urls` 数组;飞书文档链接进一步归入 `feishuDocs`,让 agent 直接喂 `read_doc` / `get_doc_blocks`
+- [x] feat: 新增 `download_file` 工具,下载消息里 msg_type=file 的附件(base64 + 可选 save_path)。merge_forward 子消息的 image/file 必须用父消息 ID 下载
+- [x] feat: `scripts/test-uat-race.js` — 多进程锁争抢的验证脚本(4 worker spawn,断言互斥 + 时间线不重叠)
+- [x] chore: 一次性清理 28 份 bot-owned 文档 / bitable / 空壳文件夹(遗留的 fallback 创建残留),留下 7 份 Obsidian 同步脚本参考 + 数学摇滚知识库同步
 
-## v1.4 — 计划中
+### v1.3.6 — 计划中
 
-### WebSocket 实时事件（核心方向）
+从原 v1.4 合并入,按实际价值裁剪。
 
-**目标**：让 MCP server 能接收飞书实时事件，从"单向操作"变成"双向对话"。
+- [ ] 本地 md → 飞书知识库同步(从 v1.3.4 拆出)
+  - md parser 依赖选型(remark / markdown-it / unified)
+  - `src/doc-blocks.js` 补齐 heading / bullet / ordered / code / quote / divider / table / todo / callout 构造器
+  - wikilink `[[page]]` 解析:按 md 文件名 / 标题 / 用户自定义 mapping 三级策略
+  - 图片内联:md `![alt](./img.png)` → 复用 v1.3.4 的 `uploadDocMedia` + `image_path` 快捷
+  - CLI 子命令 `sync-md <path>` vs MCP 工具 `sync_markdown_to_wiki` 取舍
+  - 增量 diff:已存在 wiki 节点的更新策略(全量覆盖 / 按 block_id 精细 diff)
+- [ ] CARD 消息类型(type=14)— 逆向 card JSON schema
+- [ ] 消息搜索 — 按关键词搜聊天历史(cookie 侧内部接口或 UAT)
+- [ ] 批量消息发送 — 群发多用户 / 多群
+- [ ] 多账号切换
+  - 方案 A(推荐):配置文件多 Profile,`switch_profile` / `list_profiles` 工具,Client 和 Official 实例热重载
+  - 方案 B(零代码):MCP 多实例,在 `~/.claude.json` 注册多 server 实例,每个绑定不同凭证
 
-**解锁的场景**：
-- 对话式协作：发消息后等待对方回复，自动获取回复内容
-- 群消息监控：实时监听指定群的新消息并总结
-- 事件驱动：审批通过/拒绝、文档评论、日程变更等实时通知
+### v1.3.7 — 计划中
 
-**技术方案**：
-- 飞书支持 WebSocket 长连接（仅 feishu.cn，不支持 Lark 国际版）
-- 不需要公网 URL，只需出站网络
-- 使用已有的 `@larksuiteoapi/node-sdk` 的 `WSClient`
-- MCP server 启动时后台开 WebSocket，事件缓存到内存队列
-- 新增 `get_new_events` tool，Claude 调用时返回缓存的事件
+WebSocket 实时事件 — 让 MCP server 接收飞书实时事件,从"单向操作"变成"双向对话"。
 
-**前置条件**：
-- Bot 需要在飞书开放平台后台开通事件订阅权限
-- 需要设计事件缓存策略（内存上限、过期清理、隐私考量）
-- 需要处理 WebSocket 断线重连
+**解锁场景**:
+- 对话式协作:发消息后等待对方回复,自动获取回复内容
+- 群消息监控:实时监听指定群的新消息并总结
+- 事件驱动:审批通过/拒绝、文档评论、日程变更等实时通知
 
-**实现清单**：
-- [ ] EventBuffer 类（内存队列、容量上限、按时间/chat_id 过滤）
-- [ ] WSClient 启动逻辑（集成到 main 函数，和 MCP stdio 互不干扰）
-- [ ] im.message.receive_v1 事件处理
-- [ ] get_new_events tool 定义和 handler
+**技术路径**:
+- 飞书 WebSocket 长连接(仅 feishu.cn,不支持 Lark 国际版)
+- 出站网络即可,无需公网 URL
+- 复用 `@larksuiteoapi/node-sdk` 的 `WSClient`
+- MCP server 启动时后台开连接,事件缓存到内存队列,`get_new_events` 工具拉取
+
+**实现清单**:
+- [ ] EventBuffer 类(内存队列、容量上限、按时间 / chat_id 过滤)
+- [ ] WSClient 启动逻辑(集成到 main,和 MCP stdio 互不干扰)
+- [ ] `im.message.receive_v1` 事件处理
+- [ ] `get_new_events` 工具定义和 handler
 - [ ] 断线重连 + 错误处理
-- [ ] 文档：事件订阅配置指南
-- [ ] 可选：更多事件类型（审批、日程、文档评论）
-
-### 多账号切换
-
-**方案 A（推荐）**：配置文件多 Profile
-- `switch_profile` / `list_profiles` 工具
-- Client 和 Official 实例热重载
-- Cookie 和 UAT 按 profile 独立管理
-
-**方案 B（零代码方案）**：MCP 多实例
-- 在 `~/.claude.json` 注册多个 server 实例，每个绑定不同凭证
-- 优点：无需代码改动；缺点：每个实例独立进程
-
-### 其他
-- [ ] CARD 消息类型 (type=14) — 需要逆向 card JSON schema
-- [ ] 消息搜索 — 按关键词搜索聊天历史
-- [ ] 批量消息发送 — 群发给多个用户/群
+- [ ] 文档:事件订阅配置指南
+- [ ] 可选:更多事件类型(审批、日程、文档评论)
 
 ## 已调研但暂不实施
 
-### Token 优化（文档转 Markdown）
-- `get_doc_blocks` 返回的 JSON 比等价 markdown 大 2-3x（实测 216KB vs 90KB）
-- 但 `read_doc` 已返回纯文本，`get_doc_blocks` 用户就是要结构化数据
-- 如有需求可加 `read_doc_markdown` 工具，使用 `feishu-docx` 做客户端转换
-
-### Tool 数量精简
-- 46 个 tool 每个消耗 550-1400 tokens（合计 25K-64K）
-- Claude Code 的 Tool Search 已自动延迟加载，实测降低 46.9% 开销
-- Cursor 限 40 个 tool，如需兼容再考虑拆分/合并
+### Token 优化(文档转 Markdown)
+- `get_doc_blocks` 返回的 JSON 比等价 markdown 大 2-3x(实测 216KB vs 90KB)
+- 但 `read_doc` 已返回纯文本,`get_doc_blocks` 用户就是要结构化数据
+- 如有需求可加 `read_doc_markdown` 工具,使用 `feishu-docx` 做客户端转换

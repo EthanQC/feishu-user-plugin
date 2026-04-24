@@ -31,7 +31,9 @@ curl -fsSL https://openclaw.ai/install.sh | bash
 
 ## 第三步：配置 feishu-user-plugin 为 MCP server
 
-这个插件提供 76 个飞书工具（以用户身份发消息、读聊天记录、管理文档/多维表格/日历/任务等）。
+这个插件提供 75 个飞书工具（以用户身份发消息、读聊天记录（自动展开合并转发）、管理文档/多维表格/知识库/云盘/OKR/日历、上传下载图片/文件等）。
+
+v1.3.5+ 针对 OpenClaw 这种会在短时间内拉起多个 MCP server 实例的场景做了硬化：跨进程文件锁 (`~/.claude/feishu-uat-refresh.lock`) 序列化 UAT 刷新，避免 refresh_token 被并发消耗而返回 `invalid_grant`。如果你在 OpenClaw 会话里频繁报 UAT 失败，先更新到 1.3.5 再试。
 
 运行：
 ```bash
@@ -79,3 +81,5 @@ openclaw gateway          # 启动 OpenClaw 网关
 - feishu-user-plugin 只配在 OpenClaw 的 MCP 里，不要重复安装到 Claude Code
 - OpenClaw 自带的飞书频道（channels.feishu）负责接收消息，feishu-user-plugin 提供额外工具能力（用户身份发消息、文档操作等）
 - Cookie 有效期 12 小时，建议配置 cron 自动续期：`0 */4 * * * npx feishu-user-plugin keepalive`
+- v1.3.5+ 创建资源（`create_doc` / `create_bitable` / `create_folder` / `create_doc_block` 等）时，如果 UAT 失败插件会自动 fallback 到 bot 身份并在返回里打 `⚠️` 警告；看到警告说明资源归属于 OpenClaw 的共享 bot 而非用户本人，按警告里的提示跑 `npx feishu-user-plugin oauth` 然后重启 OpenClaw 网关。
+- v1.3.5+ `read_messages` / `read_p2p_messages` 会自动把合并转发（merge_forward）消息展开为子消息。子消息里的图片/文件下载要用 `parentMessageId`（父消息 ID）而非子消息 ID，否则会报 `File not in msg`。

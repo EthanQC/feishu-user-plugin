@@ -8,7 +8,7 @@
 
 [English](README.md) | **中文**
 
-**全能飞书 MCP 服务器 — 74 个工具，9 个技能，三层认证，覆盖消息、文档、多维表格、知识库、云盘、OKR、日历。**
+**全能飞书 MCP 服务器 — 75 个工具，9 个技能，三层认证，覆盖消息、文档、多维表格、知识库、云盘、OKR、日历。**
 
 唯一支持以**你的真实身份**（而非机器人）发送飞书消息的 MCP 服务器，同时集成飞书官方 API 的全部能力。
 
@@ -34,7 +34,7 @@
 
 **一个插件，覆盖飞书全部场景。**
 
-## 工具一览（74 个）
+## 工具一览（75 个）
 
 完整的工具清单见 [CLAUDE.md](CLAUDE.md) 与 [CHANGELOG.md](CHANGELOG.md)。这里按类别列出主要能力：
 
@@ -73,7 +73,8 @@
 | 工具 | 说明 |
 |------|------|
 | `list_chats` | 列出机器人加入的所有群 |
-| `read_messages` | 读取消息历史（支持群名或 `oc_xxx` ID） |
+| `read_messages` | 读取消息历史（支持群名或 `oc_xxx` ID）。v1.3.5 自动展开 `merge_forward` 合并转发为子消息,文本自动抽取 `urls` / `feishuDocs`,图片/文件下载需用父消息 ID |
+| `download_file` | 下载消息里 msg_type=file 的附件,返回 base64 + mimeType,可选 `save_path` 存盘(v1.3.5) |
 | `reply_message` | 以机器人身份回复指定消息 |
 | `forward_message` | 转发消息到另一个会话 |
 
@@ -247,6 +248,39 @@ node src/test-all.js               # 运行完整测试
 </details>
 
 <details>
+<summary><strong>OpenClaw</strong></summary>
+
+写入 `~/.openclaw/openclaw.json`（注意 key 路径是 `mcp.servers`，不是 `mcpServers`）：
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "feishu-user-plugin": {
+        "command": "npx",
+        "args": ["-y", "feishu-user-plugin"],
+        "env": {
+          "LARK_COOKIE": "你的飞书Cookie",
+          "LARK_APP_ID": "cli_xxxxxxxxxxxx",
+          "LARK_APP_SECRET": "你的应用密钥",
+          "LARK_USER_ACCESS_TOKEN": "你的UAT",
+          "LARK_USER_REFRESH_TOKEN": "你的RefreshToken"
+        }
+      }
+    }
+  }
+}
+```
+
+或用 CLI：`openclaw mcp set feishu-user-plugin '{"command":"npx","args":["-y","feishu-user-plugin"],"env":{...}}'`。
+
+> OpenClaw 自带的飞书频道（channels.feishu）负责接收消息；本插件提供用户身份发消息 + 文档/多维表格/日历/OKR 等能力，作为 OpenClaw 的补充工具层。
+>
+> v1.3.5+ 为 OpenClaw 场景专门硬化：同一账号被拉起多份 MCP server 时，UAT 刷新会走文件锁 `~/.claude/feishu-uat-refresh.lock` 串行化，避免 refresh_token rotation race 引发的 `invalid_grant`。详见 [prompts/openclaw-setup.md](prompts/openclaw-setup.md)。
+
+</details>
+
+<details>
 <summary><strong>Cursor / VS Code / Windsurf</strong></summary>
 
 配置格式类似，具体路径参见 [English README](README.md#client-setup)。
@@ -303,9 +337,11 @@ node src/test-all.js               # 运行完整测试
 |--------|------|--------|---------|
 | Cookie | `sl_session` | 12h | 每 4h 心跳自动刷新 |
 | App Token | `tenant_access_token` | 2h | SDK 自动管理 |
-| User OAuth | `user_access_token` | ~2h | 通过 `refresh_token` 自动续期，保存到 `.env` |
+| User OAuth | `user_access_token` | ~2h | 通过 `refresh_token` 自动续期，保存到 MCP 配置 |
 
 Cookie 过期后（无心跳约 12-24h），需重新登录 feishu.cn 更新 `LARK_COOKIE`。使用 `get_login_status` 主动检查状态。
+
+如果 UAT 刷新返回 `invalid_grant`，重新运行 `npx feishu-user-plugin oauth`，然后重启 Claude Code / Codex，让正在运行的 MCP server 进程加载新 token。v1.3.5+ 会在刷新前重新读取 MCP 配置；如果另一个进程已经完成 token 轮换，旧进程会采用新 token，而不是继续使用已失效的 refresh token。
 
 ## 项目结构
 
@@ -318,7 +354,7 @@ feishu-user-plugin/
 │       ├── SKILL.md         # 主技能定义（触发条件、工具、认证）
 │       └── references/      # 9 个技能参考文档 + CLAUDE.md
 ├── src/
-│   ├── index.js             # MCP 服务器入口（74 个工具）
+│   ├── index.js             # MCP 服务器入口（75 个工具）
 │   ├── client.js            # 用户身份客户端（Protobuf 网关）
 │   ├── official.js          # 官方 API 客户端（REST、UAT）
 │   ├── utils.js             # ID 生成器、Cookie 解析
