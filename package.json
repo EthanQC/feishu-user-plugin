@@ -1,7 +1,7 @@
 {
   "name": "feishu-user-plugin",
-  "version": "1.3.5",
-  "description": "All-in-one Feishu plugin for Claude Code & Codex — messaging (with merge_forward expansion), docs (with image read/write), bitable, wiki (native + move_docs_to_wiki), drive, OKR, calendar. 75 tools + 9 skills, 3 auth layers. v1.3.5: cross-process UAT refresh lock + bot-fallback warning + auto-expand merge_forward + download_file.",
+  "version": "1.3.6",
+  "description": "All-in-one Feishu plugin for Claude Code & Codex — messaging (with merge_forward expansion + batch_send), docs (image + file blocks read/write), bitable (with attachment upload), wiki, drive (file upload + wiki attach), OKR, calendar, multi-profile. 81 tools + 9 skills, 3 auth layers. v1.3.6: upload completeness, sheets:spreadsheet scope, batch_send, multi-profile, send_card_as_user (bot-default).",
   "main": "src/index.js",
   "bin": {
     "feishu-user-plugin": "src/cli.js"

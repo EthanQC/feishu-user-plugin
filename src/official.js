@@ -1,7 +1,7 @@
 const lark = require('@larksuiteoapi/node-sdk');
 const { fetchWithTimeout } = require('./utils');
 const { classifyError } = require('./error-codes');
-const { buildEmptyImageBlock, buildReplaceImagePayload } = require('./doc-blocks');
+const { buildEmptyImageBlock, buildReplaceImagePayload, buildEmptyFileBlock, buildReplaceFilePayload } = require('./doc-blocks');
 
 // Redirect all Lark SDK logs to stderr.
 // The SDK's defaultLogger.error uses console.log (stdout), which corrupts
@@ -1447,17 +1447,36 @@ class LarkOfficialClient {
 
   // --- Docx Image Write (v1.3.4) ---
 
-  // Upload binary media (typically an image) to Feishu's drive layer so it can
-  // be attached to a docx block. Returns the media's file_token, which is what
-  // the image block's `replace_image.token` expects.
+  // Upload binary media to Feishu's drive layer so it can be attached to a
+  // docx block, sheet cell, bitable attachment field, etc. Returns the
+  // media's file_token, which is what the host block's replace_*.token
+  // (or bitable attachment field value) expects.
   //
-  // parentType = 'docx_image' for doc-embedded images (most common).
-  // parentNode = the block_id of the image placeholder (NOT the document_id).
-  async uploadDocMedia(filePath, parentNode, parentType = 'docx_image') {
+  // parentType ∈ {
+  //   docx_image, docx_file,
+  //   sheet_image, sheet_file,
+  //   bitable_image, bitable_file,
+  //   doc_image, doc_file,        // legacy doc (pre-docx)
+  //   ccm_import_open,            // import-task host
+  //   vc_virtual_background       // VC bg, grayscale-only
+  // }
+  // parentNode = the block_id (docx) / spreadsheet_token (sheet) / app_token
+  // (bitable) / doc_token (legacy) — depends on parentType.
+  async uploadMedia(filePath, parentNode, parentType = 'docx_image') {
     const fs = require('fs');
     const path = require('path');
-    if (!filePath) throw new Error('uploadDocMedia: filePath is required');
-    if (!parentNode) throw new Error('uploadDocMedia: parentNode (block_id) is required');
+    if (!filePath) throw new Error('uploadMedia: filePath is required');
+    if (!parentNode) throw new Error('uploadMedia: parentNode is required');
+    const ALLOWED = new Set([
+      'docx_image', 'docx_file',
+      'sheet_image', 'sheet_file',
+      'bitable_image', 'bitable_file',
+      'doc_image', 'doc_file',
+      'ccm_import_open', 'vc_virtual_background',
+    ]);
+    if (!ALLOWED.has(parentType)) {
+      throw new Error(`uploadMedia: unsupported parent_type "${parentType}". Allowed: ${[...ALLOWED].join(', ')}`);
+    }
 
     const stat = fs.statSync(filePath);
     const fileName = path.basename(filePath);
@@ -1465,12 +1484,22 @@ class LarkOfficialClient {
 
     // Best-effort content-type from extension. Feishu doesn't require it but
     // some CDNs behind the API key off it; the Blob default is text/plain
-    // which would look wrong for binary images.
+    // which would look wrong for binary attachments.
     const ext = path.extname(fileName).toLowerCase();
     const mimeMap = {
+      // image
       '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
       '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
       '.bmp': 'image/bmp', '.tiff': 'image/tiff', '.ico': 'image/x-icon',
+      // doc / archive
+      '.pdf': 'application/pdf', '.zip': 'application/zip',
+      '.doc': 'application/msword',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xls': 'application/vnd.ms-excel',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv', '.json': 'application/json',
     };
     const contentType = mimeMap[ext] || 'application/octet-stream';
 
@@ -1490,22 +1519,84 @@ class LarkOfficialClient {
       return res.json();
     };
 
-    // User identity first — docx_image usually belongs to a user-owned doc.
+    // User identity first — host resources are usually user-owned.
     if (this.hasUAT) {
       try {
         const data = await this._withUAT(doUpload);
         if (data.code === 0 && data.data?.file_token) {
           return { fileToken: data.data.file_token, viaUser: true };
         }
-        console.error(`[feishu-user-plugin] uploadDocMedia as user failed (${data.code}: ${data.msg}), retrying as app`);
+        console.error(`[feishu-user-plugin] uploadMedia (${parentType}) as user failed (${data.code}: ${data.msg}), retrying as app`);
       } catch (e) {
-        console.error(`[feishu-user-plugin] uploadDocMedia as user threw (${e.message}), retrying as app`);
+        console.error(`[feishu-user-plugin] uploadMedia (${parentType}) as user threw (${e.message}), retrying as app`);
       }
     }
     const appToken = await this._getAppToken();
     const data = await doUpload(appToken);
     if (data.code !== 0 || !data.data?.file_token) {
-      throw new Error(`uploadDocMedia failed: ${data.code}: ${data.msg || 'no file_token returned'}`);
+      throw new Error(`uploadMedia (${parentType}) failed: ${data.code}: ${data.msg || 'no file_token returned'}`);
+    }
+    return { fileToken: data.data.file_token, viaUser: false };
+  }
+
+  // Backwards-compat alias — old name from v1.3.4.
+  async uploadDocMedia(filePath, parentNode, parentType = 'docx_image') {
+    return this.uploadMedia(filePath, parentNode, parentType);
+  }
+
+  // Upload a file to a drive folder (NOT for embedding in a doc — that's
+  // uploadMedia). Uses drive/v1/files/upload_all with parent_type=explorer.
+  // Returns { fileToken, viaUser } where fileToken is the cloud-doc file id.
+  async uploadDriveFile(filePath, folderToken) {
+    const fs = require('fs');
+    const path = require('path');
+    if (!filePath) throw new Error('uploadDriveFile: filePath is required');
+    if (!folderToken) throw new Error('uploadDriveFile: folderToken is required (use the destination folder token; for "my space" root call list_files first to get it)');
+
+    const stat = fs.statSync(filePath);
+    const fileName = path.basename(filePath);
+    const buf = fs.readFileSync(filePath);
+    const ext = path.extname(fileName).toLowerCase();
+    const mimeMap = {
+      '.pdf': 'application/pdf', '.zip': 'application/zip',
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+      '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv', '.json': 'application/json',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    const doUpload = async (bearer) => {
+      const form = new FormData();
+      form.append('file_name', fileName);
+      form.append('parent_type', 'explorer');
+      form.append('parent_node', folderToken);
+      form.append('size', String(stat.size));
+      form.append('file', new Blob([buf], { type: contentType }), fileName);
+      const res = await fetchWithTimeout('https://open.feishu.cn/open-apis/drive/v1/files/upload_all', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${bearer}` },
+        body: form,
+        timeoutMs: 120000,
+      });
+      return res.json();
+    };
+
+    if (this.hasUAT) {
+      try {
+        const data = await this._withUAT(doUpload);
+        if (data.code === 0 && data.data?.file_token) {
+          return { fileToken: data.data.file_token, viaUser: true };
+        }
+        console.error(`[feishu-user-plugin] uploadDriveFile as user failed (${data.code}: ${data.msg}), retrying as app`);
+      } catch (e) {
+        console.error(`[feishu-user-plugin] uploadDriveFile as user threw (${e.message}), retrying as app`);
+      }
+    }
+    const appToken = await this._getAppToken();
+    const data = await doUpload(appToken);
+    if (data.code !== 0 || !data.data?.file_token) {
+      throw new Error(`uploadDriveFile failed: ${data.code}: ${data.msg || 'no file_token returned'}`);
     }
     return { fileToken: data.data.file_token, viaUser: false };
   }
@@ -1544,7 +1635,7 @@ class LarkOfficialClient {
     let viaUser = !!created._viaUser;
     let fallbackWarning = created._fallbackWarning || null;
     if (!finalToken) {
-      const uploaded = await this.uploadDocMedia(imagePath, blockId, 'docx_image');
+      const uploaded = await this.uploadMedia(imagePath, blockId, 'docx_image');
       finalToken = uploaded.fileToken;
       viaUser = viaUser && uploaded.viaUser; // true iff both steps went via user
     }
@@ -1567,7 +1658,7 @@ class LarkOfficialClient {
 
   // Replace an existing image block's media token (e.g. swap the picture in an
   // already-created image block). Expects an uploaded media token — use
-  // uploadDocMedia or create_doc_block's image_path shortcut to obtain one.
+  // uploadMedia or create_doc_block's image_path shortcut to obtain one.
   async updateDocBlockImage(documentId, blockId, imageToken) {
     const patch = buildReplaceImagePayload(imageToken);
     await this._asUserOrApp({
@@ -1581,6 +1672,125 @@ class LarkOfficialClient {
       label: 'updateDocBlockImage',
     });
     return { blockId, imageToken };
+  }
+
+  // Create a file-attachment block in a docx, mirroring createDocBlockWithImage:
+  //   1) create empty file placeholder block
+  //   2) upload the binary via uploadMedia(parent_type=docx_file)
+  //   3) PATCH with replace_file.token to attach
+  // Returns { blockId, fileToken, viaUser, fallbackWarning }.
+  async createDocBlockWithFile(documentId, parentBlockId, { filePath, fileToken, index } = {}) {
+    if (!filePath && !fileToken) {
+      throw new Error('createDocBlockWithFile: either filePath or fileToken is required');
+    }
+    const placeholder = buildEmptyFileBlock();
+    const createBody = { children: [placeholder] };
+    if (index !== undefined) createBody.index = index;
+    const created = await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${parentBlockId}/children`,
+      method: 'POST',
+      body: createBody,
+      sdkFn: () => this.client.docx.documentBlockChildren.create({
+        path: { document_id: documentId, block_id: parentBlockId },
+        data: createBody,
+      }),
+      label: 'createDocBlockWithFile.placeholder',
+    });
+    // Feishu auto-wraps a FILE block (block_type=23) in a VIEW block
+    // (block_type=33) — the create response returns the OUTER view block.
+    // We need the inner file block's id for both the media upload (parent_node)
+    // and the replace_file PATCH. Walk children to find it; fall back to a
+    // get_doc_blocks lookup if the response didn't materialize the descendant.
+    const newBlock = (created.data.children || [])[0];
+    const outerBlockId = newBlock?.block_id;
+    if (!outerBlockId) throw new Error(`createDocBlockWithFile: placeholder creation returned no block_id: ${JSON.stringify(created.data).slice(0, 400)}`);
+    // Feishu auto-wraps a FILE block (23) in a VIEW block (33). The create
+    // response's outer block is the view; we need to find the inner file
+    // block for both the media upload (parent_node) and the replace_file PATCH.
+    let blockId = outerBlockId;
+    if (newBlock.block_type !== 23) {
+      const inner = await this._findFileChildOf(documentId, outerBlockId, newBlock.children);
+      if (!inner) throw new Error(`createDocBlockWithFile: could not locate inner FILE block under view ${outerBlockId}`);
+      blockId = inner;
+    }
+
+    let finalToken = fileToken;
+    let viaUser = !!created._viaUser;
+    let fallbackWarning = created._fallbackWarning || null;
+    if (!finalToken) {
+      const uploaded = await this.uploadMedia(filePath, blockId, 'docx_file');
+      finalToken = uploaded.fileToken;
+      viaUser = viaUser && uploaded.viaUser;
+    }
+
+    const patch = buildReplaceFilePayload(finalToken);
+    await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${blockId}`,
+      method: 'PATCH',
+      body: patch,
+      sdkFn: () => this.client.docx.documentBlock.patch({
+        path: { document_id: documentId, block_id: blockId },
+        data: patch,
+      }),
+      label: 'createDocBlockWithFile.replaceFile',
+    });
+
+    return { blockId, viewBlockId: outerBlockId !== blockId ? outerBlockId : undefined, fileToken: finalToken, viaUser, fallbackWarning };
+  }
+
+  // Helper for createDocBlockWithFile — given a view block id and the children
+  // array surfaced by the create response (just IDs in docx v1), find the
+  // FILE child (block_type=23). If no children list was returned, fall back
+  // to listing the doc and walking by parent_id.
+  async _findFileChildOf(documentId, viewBlockId, childIds) {
+    if (Array.isArray(childIds) && childIds.length > 0) {
+      // childIds[0] is most likely the file block — verify with a get
+      for (const childId of childIds) {
+        try {
+          const res = await this._asUserOrApp({
+            uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${childId}`,
+            method: 'GET',
+            sdkFn: () => this.client.docx.documentBlock.get({ path: { document_id: documentId, block_id: childId } }),
+            label: '_findFileChildOf.get',
+          });
+          if (res?.data?.block?.block_type === 23) return childId;
+        } catch (_) { /* fall through */ }
+      }
+      // None matched directly; return the first as best-effort
+      return childIds[0];
+    }
+    // Fallback: list all blocks and find a 23 whose parent_id is the view block
+    try {
+      const res = await this._asUserOrApp({
+        uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks`,
+        method: 'GET',
+        sdkFn: () => this.client.docx.documentBlock.list({ path: { document_id: documentId } }),
+        label: '_findFileChildOf.list',
+      });
+      const items = res?.data?.items || [];
+      const match = items.find(b => b.block_type === 23 && b.parent_id === viewBlockId);
+      return match?.block_id || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Replace an existing file block's media token. Expects an already-uploaded
+  // file token (use uploadMedia with parent_type=docx_file, or
+  // create_doc_block's file_path shortcut).
+  async updateDocBlockFile(documentId, blockId, fileToken) {
+    const patch = buildReplaceFilePayload(fileToken);
+    await this._asUserOrApp({
+      uatPath: `/open-apis/docx/v1/documents/${documentId}/blocks/${blockId}`,
+      method: 'PATCH',
+      body: patch,
+      sdkFn: () => this.client.docx.documentBlock.patch({
+        path: { document_id: documentId, block_id: blockId },
+        data: patch,
+      }),
+      label: 'updateDocBlockFile',
+    });
+    return { blockId, fileToken };
   }
 
   // --- Wiki attach (v1.3.4) ---

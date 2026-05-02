@@ -6,11 +6,12 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - **Official API** (app credentials): Read group messages, docs, tables, wiki, drive, contacts, upload files
 - **User OAuth UAT** (user_access_token): Read P2P chat history, list all user's chats
 
-## Tool Categories (75 tools)
+## Tool Categories (81 tools)
 
 ### User Identity — Messaging (reverse-engineered, cookie-based)
 - `send_to_user` — Search user + send text (one step, most common). Returns candidates if multiple matches.
 - `send_to_group` — Search group + send text (one step). Returns candidates if multiple matches.
+- `batch_send` — Fan-out send to multiple targets in one call (text/image/file/post). Each target {type, id, content, via?} dispatches sequentially with throttling, returns per-target ok/error.
 - `send_as_user` — Send text to any chat by ID, supports reply threading (root_id/parent_id)
 - `send_image_as_user` — Send image (requires image_key from `upload_image`)
 - `send_file_as_user` — Send file (requires file_key from `upload_file`)
@@ -52,6 +53,9 @@ All-in-one Feishu plugin for Claude Code with three auth layers:
 - `list_files` / `create_folder` — Drive
 - `copy_file` / `move_file` / `delete_file` — Drive file operations (copy, move, delete)
 - `upload_image` / `upload_file` — Upload image/file, returns key for send_image/send_file
+- `upload_drive_file` — Upload a local file into a Drive folder (`drive/v1/files/upload_all`, `parent_type=explorer`). Returns `file_token` + `url`. If `wiki_space_id` is provided, the upload is followed by `attachToWiki(obj_type=file)` so the file lands as a Wiki node atomically. UAT-first with bot fallback.
+- `upload_bitable_attachment` — Upload a local file as a Bitable attachment (`drive/v1/medias/upload_all` with `parent_type=bitable_image` or `bitable_file`). Returns `file_token` to write into an Attachment-type field via `batch_create/update_bitable_records` as `[{file_token: "..."}]`.
+- `send_card_as_user` — Send a Feishu interactive card. **v1.3.6 default routes through bot identity** (the `as_user` suffix is reserved for the v1.3.7 reverse-engineered cookie path; default flips when that lands). Pass `card` JSON; `via="user"` returns an explicit deferred error in v1.3.6.
 - `download_image` — Download an image and return it as MCP image content so the model **sees the pixels**. Two modes: (1) **message image** — pass `message_id` + `image_key` from read_messages. (2) **docx image** — pass `image_token` (from `get_doc_blocks` image block) and optionally `doc_token` (native id / wiki node / Feishu URL). Tries UAT first, falls back to app token. **merge_forward children**: use the child's `parentMessageId` (NOT the child id) — Feishu returns `File not in msg` with the child id.
 - `download_file` — Download a file (msg_type=file) attachment. Returns base64 + mimeType + byte count; optional `save_path` writes the file to disk. Same parent-id rule for merge_forward children as download_image.
 - `list_user_okrs` / `get_okrs` / `list_okr_periods` — OKR read. UAT-first (works for the authenticated user's OKRs) with app fallback when OKR scope is granted.
@@ -126,9 +130,22 @@ Write — `create_doc_block` now has image shortcuts:
 - Create doc with content → `create_doc` → `create_doc_block` (use document_id as parent_block_id for root)
 - Edit existing block → `get_doc_blocks` to find block_id → `update_doc_block`
 - Delete blocks → `delete_doc_blocks` with start/end index range
+- Insert image → `create_doc_block` with `image_path` (local file) or `image_token` (already uploaded). Three-step flow handled internally.
+- Insert file attachment (PDF/zip/xlsx/...) → `create_doc_block` with `file_path` or `file_token`. Feishu auto-wraps the FILE block (block_type=23) inside a VIEW container (block_type=33); the plugin walks into the inner file block automatically before the `replace_file` PATCH so the upload + attach succeed.
+- Replace existing image/file in a block → `update_doc_block` with `image_token` / `file_token`.
 
 ### Diagnostics
 - Diagnose issues → `get_login_status` first
+
+### Profiles (v1.3.6)
+Multi-account / multi-tenant support without restarting the MCP server:
+- `list_profiles` — see all profiles + the active one. Default profile uses top-level env vars; extras come from `LARK_PROFILES_JSON`.
+- `switch_profile(name)` — hot-swap credentials. Cached client instances are invalidated so the next call rebuilds against the new profile.
+
+To register more profiles, set `LARK_PROFILES_JSON` in the MCP env:
+```json
+{"alt": {"LARK_COOKIE":"...","LARK_APP_ID":"...","LARK_APP_SECRET":"...","LARK_USER_ACCESS_TOKEN":"...","LARK_USER_REFRESH_TOKEN":"..."}}
+```
 
 ## Auth & Session
 - **LARK_COOKIE**: Required for user identity tools. Session auto-refreshed every 4h via heartbeat and persisted to config.
@@ -541,10 +558,10 @@ The v1.3.4 tools require additional scopes on the app + UAT:
 |---------|-------------------------------------------|
 | OKR read | `okr:okr:readonly`, `okr:period:read` |
 | Calendar read | `calendar:calendar:readonly`, `calendar:calendar.event:read` |
-| Docx image write (`uploadDocMedia`) | `drive:drive`, `docx:document`, `docx:document:readonly` (image upload piggy-backs on existing docx editing scopes) |
+| Docx/Bitable/Drive media upload (`uploadMedia`, `upload_drive_file`, `upload_bitable_attachment`, `create_doc_block` image/file) | `drive:drive`, `drive:file:upload`, `docs:document.media:upload`, `sheets:spreadsheet` (only for sheet uploads) |
 | Wiki attach (`move_docs_to_wiki`) | `wiki:wiki` (edit scope, the readonly one is insufficient) |
 
-If a tool returns `access_denied` or error code `99991672` (scope not granted), enable the missing scope at https://open.feishu.cn/app → Permissions, then re-run `npx feishu-user-plugin oauth` so the UAT picks up the new scopes.
+If a tool returns `access_denied` or error code `99991672` (scope not granted), the scope is missing on either the app or the UAT. Re-run `npx feishu-user-plugin oauth` so the UAT picks up the latest scope list (defined in `src/oauth.js`).
 
 ## Known Limitations
 - CARD message type (type=14) not yet implemented — complex JSON schema

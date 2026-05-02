@@ -3,10 +3,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
 [![MCP](https://img.shields.io/badge/MCP-Compatible-purple.svg)](https://modelcontextprotocol.io)
-[![Tools](https://img.shields.io/badge/Tools-74-orange.svg)](#tools)
+[![Tools](https://img.shields.io/badge/Tools-81-orange.svg)](#tools)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**All-in-one Feishu/Lark MCP Server -- 75 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, OKR, and more.**
+**All-in-one Feishu/Lark MCP Server -- 81 tools, 9 skills, 3 auth layers for messaging, docs, bitable, calendar, tasks, drive, OKR, and more.**
 
 The only MCP server that lets you send messages as your **personal identity** (not a bot), while also integrating the full official Feishu API. Works with Claude Code, Cursor, Windsurf, OpenClaw, and any MCP-compatible client.
 
@@ -337,9 +337,9 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 }
 ```
 
-## Tools (75 total)
+## Tools (81 total)
 
-### User Identity -- Messaging (8 tools, cookie auth)
+### User Identity -- Messaging (10 tools, cookie auth)
 
 | Tool | Description |
 |------|-------------|
@@ -351,6 +351,8 @@ Add to `~/.codeium/windsurf/mcp_config.json`:
 | `send_post_as_user` | Send rich text with title + formatted paragraphs |
 | `send_sticker_as_user` | Send sticker/emoji |
 | `send_audio_as_user` | Send audio message |
+| `batch_send` | Fan-out send to multiple targets in one call (text / image / file / post). v1.3.6 |
+| `send_card_as_user` | Send a Feishu interactive card. v1.3.6 default routes through bot identity; user-identity is reserved for v1.3.7. |
 
 ### User Identity -- Contacts & Info (5 tools, cookie auth)
 
@@ -415,11 +417,11 @@ All docx / bitable tools' `document_id` / `app_token` parameter also accepts a W
 | `read_doc` | Read raw text content |
 | `get_doc_blocks` | Get structured block tree |
 | `create_doc` | Create a new document |
-| `create_doc_block` | Insert content blocks into a document |
-| `update_doc_block` | Update a specific block |
+| `create_doc_block` | Insert content blocks: generic `children`, `image_path` / `image_token` (image block), `file_path` / `file_token` (file attachment block, v1.3.6) |
+| `update_doc_block` | Update a specific block: generic `update_body`, `image_token`, or `file_token` (v1.3.6) |
 | `delete_doc_blocks` | Delete a range of blocks |
 
-### Official API -- Bitable (17 tools)
+### Official API -- Bitable (18 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -430,6 +432,7 @@ All docx / bitable tools' `document_id` / `app_token` parameter also accepts a W
 | `search_bitable_records` / `get_bitable_record` | Query records |
 | `create_bitable_record` / `update_bitable_record` / `delete_bitable_record` | Single record CRUD |
 | `batch_create_bitable_records` / `batch_update_bitable_records` / `batch_delete_bitable_records` | Batch operations (max 500/call) |
+| `upload_bitable_attachment` | Upload a file into a Bitable Attachment-type field. Returns `file_token` to write into the field as `[{file_token}]`. v1.3.6 |
 
 ### Official API -- Calendar (5 tools)
 
@@ -451,7 +454,7 @@ All docx / bitable tools' `document_id` / `app_token` parameter also accepts a W
 | `update_task` | Update a task |
 | `complete_task` | Mark task as complete |
 
-### Official API -- Drive (5 tools)
+### Official API -- Drive (6 tools)
 
 | Tool | Description |
 |------|-------------|
@@ -460,6 +463,7 @@ All docx / bitable tools' `document_id` / `app_token` parameter also accepts a W
 | `copy_file` | Copy a file |
 | `move_file` | Move a file |
 | `delete_file` | Delete a file/folder |
+| `upload_drive_file` | Upload a local file into a Drive folder (`drive/v1/files/upload_all`). Optional `wiki_space_id` attaches the upload as a Wiki node atomically. v1.3.6 |
 
 ### Official API -- Wiki & Contacts (4 tools)
 
@@ -467,6 +471,13 @@ All docx / bitable tools' `document_id` / `app_token` parameter also accepts a W
 |------|-------------|
 | `list_wiki_spaces` / `search_wiki` / `list_wiki_nodes` | Wiki spaces, search, browse |
 | `find_user` | Find user by email or mobile number |
+
+### Plugin -- Profiles (2 tools, v1.3.6)
+
+| Tool | Description |
+|------|-------------|
+| `list_profiles` | List available identity profiles (default + extras from `LARK_PROFILES_JSON`) and the active one |
+| `switch_profile` | Hot-swap active profile; cached client instances rebuild against new credentials |
 
 ## Claude Code Slash Commands (9 skills)
 
@@ -526,7 +537,7 @@ feishu-user-plugin/
 │       ├── SKILL.md         # Main skill definition (trigger, tools, auth)
 │       └── references/      # 8 skill reference docs + CLAUDE.md
 ├── src/
-│   ├── index.js             # MCP server entry point (75 tools)
+│   ├── index.js             # MCP server entry point (81 tools)
 │   ├── client.js            # User identity client (Protobuf gateway)
 │   ├── official.js          # Official API client (REST, UAT)
 │   ├── utils.js             # ID generators, cookie parser

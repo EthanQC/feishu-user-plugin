@@ -81,27 +81,39 @@
 - [x] feat: `scripts/test-uat-race.js` — 多进程锁争抢的验证脚本(4 worker spawn,断言互斥 + 时间线不重叠)
 - [x] chore: 一次性清理 28 份 bot-owned 文档 / bitable / 空壳文件夹(遗留的 fallback 创建残留),留下 7 份 Obsidian 同步脚本参考 + 数学摇滚知识库同步
 
-### v1.3.6 — 计划中
+### v1.3.6 — 上传完整化 + 多账号 + batch_send + send_card_as_user (bot-default)
 
-从原 v1.4 合并入,按实际价值裁剪。
-
-- [ ] 本地 md → 飞书知识库同步(从 v1.3.4 拆出)
-  - md parser 依赖选型(remark / markdown-it / unified)
-  - `src/doc-blocks.js` 补齐 heading / bullet / ordered / code / quote / divider / table / todo / callout 构造器
-  - wikilink `[[page]]` 解析:按 md 文件名 / 标题 / 用户自定义 mapping 三级策略
-  - 图片内联:md `![alt](./img.png)` → 复用 v1.3.4 的 `uploadDocMedia` + `image_path` 快捷
-  - CLI 子命令 `sync-md <path>` vs MCP 工具 `sync_markdown_to_wiki` 取舍
-  - 增量 diff:已存在 wiki 节点的更新策略(全量覆盖 / 按 block_id 精细 diff)
-- [ ] CARD 消息类型(type=14)— 逆向 card JSON schema
-- [ ] 消息搜索 — 按关键词搜聊天历史(cookie 侧内部接口或 UAT)
-- [ ] 批量消息发送 — 群发多用户 / 多群
-- [ ] 多账号切换
-  - 方案 A(推荐):配置文件多 Profile,`switch_profile` / `list_profiles` 工具,Client 和 Official 实例热重载
-  - 方案 B(零代码):MCP 多实例,在 `~/.claude.json` 注册多 server 实例,每个绑定不同凭证
+- [x] 上传能力完整化
+  - `uploadDocMedia` → `uploadMedia` 通用化,支持 8 种 parent_type(docx/sheet/bitable × image/file + doc_image/doc_file 兼容)
+  - docx file block 写入:`create_doc_block` 多 `file_path` / `file_token`,`update_doc_block` 多 `file_token`。处理飞书自动用 view 容器(block_type=33)包裹 file 块(block_type=23)的坑——先查内层再 replace_file
+  - 新增 `upload_drive_file` 工具:`drive/v1/files/upload_all` parent_type=explorer,支持 `wiki_space_id` 直接挂到 wiki(走 `attachToWiki(obj_type=file)`)
+  - 新增 `upload_bitable_attachment` 工具:`uploadMedia` with parent_type=bitable_image/bitable_file,返回的 file_token 可直接塞进 Bitable Attachment 字段
+- [x] OAuth scope 扩充:加 `drive:file:upload`、`sheets:spreadsheet`(team app 后台同步开通并发布 v3.7.0)
+- [x] `batch_send` 工具:多目标 fan-out(text/image/file/post),按 delay_ms 节流,per-target ok/error
+- [x] 多 profile:`list_profiles` / `switch_profile` 工具,通过 `LARK_PROFILES_JSON` 注册多套凭证,热切换不重启
+- [x] `send_card_as_user`(bot-default):via=bot 走 `send_message_as_bot('interactive', card)`,via=user 在 v1.3.6 显式返回 deferred 错误。一旦 v1.3.7 实现 user-identity 卡片必须**移除 bot-default**
 
 ### v1.3.7 — 计划中
 
-WebSocket 实时事件 — 让 MCP server 接收飞书实时事件,从"单向操作"变成"双向对话"。
+#### 逆向工程任务(从 v1.3.6 推迟)
+
+- [ ] `send_card_as_user` 真·用户身份(从 v1.3.6 推迟)— 录飞书 web 客户端发卡片时的 protobuf payload,实现 type=14 用户身份发送。**实现完成后必须删除 v1.3.6 的 bot-default 兜底**(handler 里 via=bot fallback)
+- [ ] `search_messages` — 按关键词搜聊天历史。先试 UAT `/open-apis/im/v1/messages/search` 是否存在,不存在则逆向 cookie 路径
+
+#### 本地 md 同步(从 v1.3.4/1.3.6 拆出再推迟)
+
+- [ ] 本地 md → 飞书知识库同步
+  - md parser 依赖选型(remark / markdown-it / unified)
+  - `src/doc-blocks.js` 补齐 heading / bullet / ordered / code / quote / divider / table / todo / callout 构造器
+  - wikilink `[[page]]` 解析:按 md 文件名 / 标题 / 用户自定义 mapping 三级策略
+  - 图片内联:md `![alt](./img.png)` → 复用 `uploadMedia(parent_type='docx_image')` + `image_path` 快捷
+  - 文件附件 inline:md `[xxx.pdf](./xxx.pdf)` → 复用 `file_path` 快捷
+  - CLI 子命令 `sync-md <path>` vs MCP 工具 `sync_markdown_to_wiki` 取舍
+  - 增量 diff:已存在 wiki 节点的更新策略(全量覆盖 / 按 block_id 精细 diff)
+
+#### WebSocket 实时事件
+
+让 MCP server 接收飞书实时事件,从"单向操作"变成"双向对话"。
 
 **解锁场景**:
 - 对话式协作:发消息后等待对方回复,自动获取回复内容

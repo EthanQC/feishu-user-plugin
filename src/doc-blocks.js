@@ -1,10 +1,8 @@
 // Helpers for constructing docx block payloads.
 //
-// Right now (v1.3.4) only the image path is implemented — enough to cover the
-// create_doc_block / update_doc_block image shortcuts. More block builders
-// (heading / list / code / table) will land in v1.3.5 when the local-markdown
-// → wiki-docx sync feature is built; parking the skeleton here now so the
-// later additions don't introduce a new file.
+// v1.3.4 added image block builders. v1.3.6 adds file block builders so the
+// create_doc_block / update_doc_block tools can attach arbitrary file
+// attachments (PDF / zip / etc.) the same way they handle images.
 
 // docx v1 block_type enum (relevant subset).
 // Docs: https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/create
@@ -63,8 +61,25 @@ function buildReplaceImagePayload(imageToken) {
   return { replace_image: { token: imageToken } };
 }
 
+// File-block flow mirrors the image-block flow but uses block_type=23 (FILE)
+// and parent_type=docx_file when uploading the binary, and replace_file in
+// the PATCH body. See official.js::createDocBlockWithFile.
+
+/** Empty file block placeholder for step 1 of file attachment flow. */
+function buildEmptyFileBlock() {
+  return { block_type: BLOCK_TYPE.FILE, file: {} };
+}
+
+/** Patch body that swaps an empty file block's content with an uploaded file token. */
+function buildReplaceFilePayload(fileToken) {
+  if (!fileToken) throw new Error('buildReplaceFilePayload: fileToken is required');
+  return { replace_file: { token: fileToken } };
+}
+
 module.exports = {
   BLOCK_TYPE,
   buildEmptyImageBlock,
   buildReplaceImagePayload,
+  buildEmptyFileBlock,
+  buildReplaceFilePayload,
 };

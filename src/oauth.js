@@ -28,7 +28,10 @@ const REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`;
 //   calendar:*                             for list_calendars / list_calendar_events / get_calendar_event
 //   wiki:wiki                              write access for move_docs_to_wiki (attach docs/bitables to wiki)
 //   docs:document.media:(upload|download)  for docx image read/write
-const SCOPES = 'offline_access auth:user.id:read im:message im:message:readonly im:chat im:chat:readonly contact:user.base:readonly contact:user.id:readonly docx:document drive:drive bitable:app wiki:wiki:readonly wiki:wiki okr:okr:readonly okr:okr.period:readonly okr:okr.content:readonly calendar:calendar:readonly calendar:calendar.event:read docs:document.media:download docs:document.media:upload';
+// v1.3.6 additions:
+//   sheets:spreadsheet                     for sheet_image / sheet_file media uploads
+//   drive:file:upload                      narrower scope for drive/v1/files/upload_all (independent of drive:drive)
+const SCOPES = 'offline_access auth:user.id:read im:message im:message:readonly im:chat im:chat:readonly contact:user.base:readonly contact:user.id:readonly docx:document drive:drive drive:file:upload bitable:app wiki:wiki:readonly wiki:wiki okr:okr:readonly okr:okr.period:readonly okr:okr.content:readonly calendar:calendar:readonly calendar:calendar.event:read docs:document.media:download docs:document.media:upload sheets:spreadsheet';
 
 if (!APP_ID || !APP_SECRET) {
   console.error('Missing LARK_APP_ID or LARK_APP_SECRET.');

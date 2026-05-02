@@ -113,17 +113,53 @@ class ChatIdMapper {
   }
 }
 
-// --- Client Singletons ---
+// --- Client Singletons + Profiles ---
 
 let userClient = null;
 let officialClient = null;
 const chatIdMapper = new ChatIdMapper();
 
+// Profile system (v1.3.6).
+// Default behaviour is identical to pre-1.3.6: LARK_COOKIE / LARK_APP_ID / etc.
+// from process.env act as profile "default". To register more profiles, set
+// LARK_PROFILES_JSON in the MCP env to a JSON object:
+//   { "alt": { "LARK_COOKIE": "...", "LARK_APP_ID": "...", ... }, ... }
+// Then call switch_profile to change which credential set is active.
+let currentProfile = 'default';
+
+function loadProfileMap() {
+  const raw = process.env.LARK_PROFILES_JSON;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch (e) {
+    console.error(`[feishu-user-plugin] LARK_PROFILES_JSON parse failed: ${e.message}`);
+  }
+  return {};
+}
+
+function profileEnv(name) {
+  if (name === 'default') {
+    return {
+      LARK_COOKIE: process.env.LARK_COOKIE,
+      LARK_APP_ID: process.env.LARK_APP_ID,
+      LARK_APP_SECRET: process.env.LARK_APP_SECRET,
+      LARK_USER_ACCESS_TOKEN: process.env.LARK_USER_ACCESS_TOKEN,
+      LARK_USER_REFRESH_TOKEN: process.env.LARK_USER_REFRESH_TOKEN,
+    };
+  }
+  const profiles = loadProfileMap();
+  if (!profiles[name]) throw new Error(`Profile "${name}" not found. Available: ${['default', ...Object.keys(profiles)].join(', ')}`);
+  return profiles[name];
+}
+
 async function getUserClient() {
   if (userClient) return userClient;
-  const cookie = process.env.LARK_COOKIE;
+  const env = profileEnv(currentProfile);
+  const cookie = env.LARK_COOKIE;
   if (!cookie) throw new Error(
-    'LARK_COOKIE not set. To fix:\n' +
+    `LARK_COOKIE not set for profile "${currentProfile}". To fix:\n` +
     '1. Open https://www.feishu.cn/messenger/ and log in\n' +
     '2. DevTools → Network tab → Disable cache → Reload → Click first request → Request Headers → Cookie → Copy value\n' +
     '   (Do NOT use document.cookie or Application→Cookies — they miss HttpOnly cookies like session/sl_session)\n' +
@@ -137,21 +173,52 @@ async function getUserClient() {
 
 function getOfficialClient() {
   if (officialClient) return officialClient;
-  const appId = process.env.LARK_APP_ID;
-  const appSecret = process.env.LARK_APP_SECRET;
+  const env = profileEnv(currentProfile);
+  const appId = env.LARK_APP_ID;
+  const appSecret = env.LARK_APP_SECRET;
   if (!appId || !appSecret) throw new Error(
-    'LARK_APP_ID and LARK_APP_SECRET not set.\n' +
+    `LARK_APP_ID and LARK_APP_SECRET not set for profile "${currentProfile}".\n` +
     'For team members: these should be pre-filled in your .mcp.json. Check that the config was copied correctly from the team-skills README.\n' +
     'For external users: create a Custom App at https://open.feishu.cn/app, get the App ID and App Secret, add them to your .mcp.json env.'
   );
+  // Honor profile-specific UAT env if present (LarkOfficialClient.loadUAT uses
+  // process.env directly; we patch the env temporarily for non-default profiles)
+  const prevUAT = process.env.LARK_USER_ACCESS_TOKEN;
+  const prevRT = process.env.LARK_USER_REFRESH_TOKEN;
+  if (currentProfile !== 'default') {
+    if (env.LARK_USER_ACCESS_TOKEN) process.env.LARK_USER_ACCESS_TOKEN = env.LARK_USER_ACCESS_TOKEN;
+    if (env.LARK_USER_REFRESH_TOKEN) process.env.LARK_USER_REFRESH_TOKEN = env.LARK_USER_REFRESH_TOKEN;
+  }
   officialClient = new LarkOfficialClient(appId, appSecret);
   officialClient.loadUAT();
+  if (currentProfile !== 'default') {
+    process.env.LARK_USER_ACCESS_TOKEN = prevUAT;
+    process.env.LARK_USER_REFRESH_TOKEN = prevRT;
+  }
   return officialClient;
 }
 
 // --- Tool Definitions ---
 
 const TOOLS = [
+  // ========== Profile management (v1.3.6) ==========
+  {
+    name: 'list_profiles',
+    description: '[Plugin] List all available identity profiles (sets of LARK_COOKIE/APP_ID/APP_SECRET/UAT). The "default" profile uses the top-level env vars; additional profiles come from LARK_PROFILES_JSON. Marks the currently active profile.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'switch_profile',
+    description: '[Plugin] Switch the active identity profile. Subsequent tool calls use the new profile\'s credentials. Cached client instances are reset so the next call rebuilds against the new creds.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Profile name. "default" for top-level env vars; any key from LARK_PROFILES_JSON otherwise.' },
+      },
+      required: ['name'],
+    },
+  },
+
   // ========== User Identity — Send Messages ==========
   {
     name: 'send_as_user',
@@ -204,6 +271,22 @@ const TOOLS = [
         },
       },
       required: ['group_name', 'text'],
+    },
+  },
+  {
+    name: 'batch_send',
+    description: '[User Identity / Official API] Send the same or different content to multiple targets in one call. Each target dispatches sequentially with a small delay (anti-rate-limit) and reports per-target success/error. Identity is the cookie user (user-identity sends) unless target.via=bot. Use for broadcast / fan-out scenarios.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        targets: {
+          type: 'array',
+          description: 'Array of targets. Each entry: { type: "user"|"group"|"chat", id: <user_name | group_name | chat_id>, content: { kind: "text"|"image"|"file"|"post", ... } }. For kind="text": { text }. For "image": { image_key }. For "file": { file_key, file_name }. For "post": { title, paragraphs }. Optional per-target: via="bot" routes through send_message_as_bot (chat_id required).',
+          items: { type: 'object' },
+        },
+        delay_ms: { type: 'number', description: 'Delay between sends in milliseconds (default 200, increase for risky volumes).' },
+      },
+      required: ['targets'],
     },
   },
   {
@@ -689,6 +772,33 @@ const TOOLS = [
       required: ['file_path'],
     },
   },
+  {
+    name: 'upload_drive_file',
+    description: '[Official API] Upload a file from disk to a Feishu Drive folder (drive/v1/files/upload_all, parent_type=explorer). Returns file_token + url. If wiki_space_id is provided, the uploaded file is then attached to that Wiki space via move_docs_to_wiki (obj_type=file). UAT-first with app fallback.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file_path: { type: 'string', description: 'Absolute path to the file on disk' },
+        folder_token: { type: 'string', description: 'Destination folder token. Use list_files to find one, or pass the user "我的空间" root token.' },
+        wiki_space_id: { type: 'string', description: 'Optional. If set, also attach the uploaded file to this Wiki space.' },
+        wiki_parent_node_token: { type: 'string', description: 'Optional. Parent node under which to attach in the Wiki space.' },
+      },
+      required: ['file_path', 'folder_token'],
+    },
+  },
+  {
+    name: 'upload_bitable_attachment',
+    description: '[Official API] Upload a file as a Bitable attachment (drive/v1/medias/upload_all with parent_type=bitable_image or bitable_file). Returns file_token suitable for writing into a Bitable Attachment-type field via batch_create/update_bitable_records (the field value should be [{file_token}]).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        app_token: { type: 'string', description: 'Bitable app token (the bascn... or basc... id)' },
+        file_path: { type: 'string', description: 'Absolute path to the file on disk' },
+        kind: { type: 'string', enum: ['image', 'file'], description: 'Whether the attachment is an image (bitable_image) or a generic file (bitable_file). Default: file.' },
+      },
+      required: ['app_token', 'file_path'],
+    },
+  },
 
   // ========== Contact — Official API ==========
   {
@@ -715,6 +825,19 @@ const TOOLS = [
         content: { description: 'Message content (string or object, auto-serialized). Plain text: {"text":"hello"}. Text with @-mention: {"text":"<at user_id=\\"ou_xxx\\">Alice</at> hi"} — the inline tag becomes a real @-notification.' },
       },
       required: ['chat_id', 'msg_type', 'content'],
+    },
+  },
+  {
+    name: 'send_card_as_user',
+    description: '[v1.3.6: bot-routed default] Send an interactive card to a chat. **As of v1.3.6, identity defaults to BOT** because user-identity card sending requires reverse-engineering the Feishu web protobuf and is deferred to v1.3.7. The tool name keeps the "as_user" suffix so callers don\'t have to migrate when v1.3.7 lands; once user-identity is implemented the default flips. Pass `card` as a JSON object (Feishu card schema). To force bot explicitly set via="bot".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        chat_id: { type: 'string', description: 'Target chat_id (oc_xxx) or open_id' },
+        card: { description: 'Feishu card JSON. See https://open.feishu.cn/cardkit for the schema; build cards visually then paste the resulting JSON here.' },
+        via: { type: 'string', enum: ['bot', 'user'], description: 'Identity to send as. Default "bot". "user" returns an explicit not-yet-implemented error in v1.3.6.' },
+      },
+      required: ['chat_id', 'card'],
     },
   },
   {
@@ -837,15 +960,17 @@ const TOOLS = [
   // ========== Docs — Block Editing ==========
   {
     name: 'create_doc_block',
-    description: '[Official API] Insert content blocks into a document. Three modes:\n  (A) Generic — pass `children` array (e.g. [{block_type:2, text:{...}}]) for text/heading/list/etc.\n  (B) Image from local file — pass `image_path` (absolute path); the plugin creates an image block, uploads the file to drive, and patches the block with the token. Returns block_id + image_token.\n  (C) Image from uploaded token — pass `image_token` (from a previous uploadDocMedia or docx image block) to reuse an already-uploaded image.\n`document_id` accepts native document_id, wiki node token, or Feishu URL.',
+    description: '[Official API] Insert content blocks into a document. Five modes:\n  (A) Generic — pass `children` array (e.g. [{block_type:2, text:{...}}]) for text/heading/list/etc.\n  (B) Image from local file — pass `image_path` (absolute path); the plugin creates an image block, uploads the file to drive, and patches the block with the token. Returns block_id + image_token.\n  (C) Image from uploaded token — pass `image_token` to reuse an already-uploaded image.\n  (D) File attachment from local file — pass `file_path`; the plugin creates a file block (block_type=23), uploads via parent_type=docx_file, and patches with replace_file.\n  (E) File from uploaded token — pass `file_token` to reuse an already-uploaded file.\n`document_id` accepts native document_id, wiki node token, or Feishu URL.',
     inputSchema: {
       type: 'object',
       properties: {
         document_id: { type: 'string', description: 'Document ID, wiki node token, or Feishu URL' },
         parent_block_id: { type: 'string', description: 'Parent block ID (use document_id for root)' },
         children: { type: 'array', description: 'Generic block objects — mode A. E.g. [{block_type:2, text:{elements:[{text_run:{content:"Hello"}}]}}]', items: { type: 'object' } },
-        image_path: { type: 'string', description: 'Local image path — mode B (mutually exclusive with children / image_token)' },
-        image_token: { type: 'string', description: 'Pre-uploaded docx image token — mode C (mutually exclusive with children / image_path)' },
+        image_path: { type: 'string', description: 'Local image path — mode B (mutually exclusive with other modes)' },
+        image_token: { type: 'string', description: 'Pre-uploaded docx image token — mode C (mutually exclusive with other modes)' },
+        file_path: { type: 'string', description: 'Local file path for an attachment block — mode D (mutually exclusive with other modes)' },
+        file_token: { type: 'string', description: 'Pre-uploaded docx file token — mode E (mutually exclusive with other modes)' },
         index: { type: 'number', description: 'Insert position (optional, appends to end if omitted)' },
       },
       required: ['document_id', 'parent_block_id'],
@@ -853,7 +978,7 @@ const TOOLS = [
   },
   {
     name: 'update_doc_block',
-    description: '[Official API] Update a specific block in a document. Generic mode: pass update_body. Image-replace mode: pass image_token to swap the picture in an existing image block. document_id accepts native ID, wiki node token, or Feishu URL.',
+    description: '[Official API] Update a specific block in a document. Generic mode: pass update_body. Image-replace mode: pass image_token to swap the picture in an existing image block. File-replace mode: pass file_token to swap an existing file block. document_id accepts native ID, wiki node token, or Feishu URL.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -861,6 +986,7 @@ const TOOLS = [
         block_id: { type: 'string', description: 'Block ID to update' },
         update_body: { type: 'object', description: 'Generic update payload. E.g. {update_text_elements:{elements:[{text_run:{content:"new text"}}]}}' },
         image_token: { type: 'string', description: 'Pre-uploaded image token — if provided, update_body is ignored and the block is patched with {replace_image:{token}}' },
+        file_token: { type: 'string', description: 'Pre-uploaded file token — patches the block with {replace_file:{token}}' },
       },
       required: ['document_id', 'block_id'],
     },
@@ -1177,6 +1303,25 @@ async function resolveDocId(input) {
 async function handleTool(name, args) {
 
   switch (name) {
+    // --- Profile management (v1.3.6) ---
+
+    case 'list_profiles': {
+      const profiles = loadProfileMap();
+      const all = ['default', ...Object.keys(profiles)];
+      return json({ active: currentProfile, profiles: all });
+    }
+    case 'switch_profile': {
+      const target = args.name;
+      const profiles = loadProfileMap();
+      const all = ['default', ...Object.keys(profiles)];
+      if (!all.includes(target)) return text(`Profile "${target}" not found. Available: ${all.join(', ')}. To add more, set LARK_PROFILES_JSON in your MCP env.`);
+      currentProfile = target;
+      // Invalidate cached client instances so the next call uses the new creds
+      userClient = null;
+      officialClient = null;
+      return text(`Switched to profile: ${target}`);
+    }
+
     // --- User Identity: Text Messaging ---
 
     case 'send_as_user': {
@@ -1211,6 +1356,56 @@ async function handleTool(name, args) {
       const group = groups[0];
       const r = await c.sendMessage(group.id, args.text, { ats: args.ats });
       return sendResult(r, `Text sent to group "${group.title}" (${group.id})`);
+    }
+    case 'batch_send': {
+      if (!Array.isArray(args.targets) || args.targets.length === 0) return text('batch_send: targets must be a non-empty array');
+      const delay = typeof args.delay_ms === 'number' ? args.delay_ms : 200;
+      const userClient = await getUserClient();
+      const officialClient = getOfficialClient();
+      const results = [];
+      for (let i = 0; i < args.targets.length; i++) {
+        const t = args.targets[i];
+        try {
+          if (!t.content || !t.content.kind) throw new Error('content.kind is required');
+          // Resolve chat id from name when applicable
+          let chatId = t.id;
+          if (t.type === 'user' || t.type === 'group') {
+            const matches = await userClient.search(t.id);
+            const want = matches.filter(m => m.type === t.type);
+            if (want.length === 0) throw new Error(`No ${t.type} matches "${t.id}"`);
+            if (want.length > 1) throw new Error(`Ambiguous ${t.type} "${t.id}" (${want.length} matches). Use type="chat" with explicit chat_id.`);
+            const picked = want[0];
+            chatId = t.type === 'user' ? await userClient.createChat(picked.id) : picked.id;
+            if (!chatId) throw new Error(`Could not resolve chat for ${t.type} ${picked.title}`);
+          }
+          let r;
+          if (t.via === 'bot') {
+            const c = t.content;
+            const payload = c.kind === 'text' ? { text: c.text }
+              : c.kind === 'post' ? { post: { zh_cn: { title: c.title || '', content: c.paragraphs || [] } } }
+              : c.kind === 'image' ? { image_key: c.image_key }
+              : c.kind === 'interactive' ? c.card
+              : null;
+            if (!payload) throw new Error(`bot path does not support content.kind=${c.kind}`);
+            const msgType = c.kind === 'interactive' ? 'interactive' : c.kind;
+            r = await officialClient.sendMessageAsBot(chatId, msgType, payload);
+            results.push({ ok: true, target: t, messageId: r.messageId, via: 'bot' });
+          } else {
+            const c = t.content;
+            if (c.kind === 'text') r = await userClient.sendMessage(chatId, c.text, { ats: c.ats });
+            else if (c.kind === 'image') r = await userClient.sendImage(chatId, c.image_key);
+            else if (c.kind === 'file') r = await userClient.sendFile(chatId, c.file_key, c.file_name);
+            else if (c.kind === 'post') r = await userClient.sendPost(chatId, c.title, c.paragraphs);
+            else throw new Error(`unknown content.kind=${c.kind}`);
+            results.push({ ok: true, target: t, messageId: r.messageId, via: 'user' });
+          }
+        } catch (e) {
+          results.push({ ok: false, target: t, error: e.message });
+        }
+        if (i < args.targets.length - 1 && delay > 0) await new Promise(r => setTimeout(r, delay));
+      }
+      const okCount = results.filter(r => r.ok).length;
+      return json({ summary: `${okCount}/${results.length} sent`, results });
     }
 
     // --- User Identity: Rich Message Types ---
@@ -1510,9 +1705,38 @@ async function handleTool(name, args) {
       const r = await getOfficialClient().uploadFile(args.file_path, args.file_type, args.file_name);
       return text(`File uploaded: ${r.fileKey}\nUse this file_key with send_file_as_user to send it.`);
     }
+    case 'upload_drive_file': {
+      const official = getOfficialClient();
+      const up = await official.uploadDriveFile(args.file_path, args.folder_token);
+      const out = { fileToken: up.fileToken, viaUser: up.viaUser, url: `https://feishu.cn/file/${up.fileToken}` };
+      if (args.wiki_space_id) {
+        try {
+          const node = await official.attachToWiki(args.wiki_space_id, 'file', up.fileToken, args.wiki_parent_node_token);
+          out.wikiNodeToken = node.node_token || null;
+          out.wikiAttachTaskId = node.task_id || null;
+        } catch (e) {
+          out.wikiAttachError = e.message;
+        }
+      }
+      return json(out);
+    }
+    case 'upload_bitable_attachment': {
+      const kind = args.kind === 'image' ? 'bitable_image' : 'bitable_file';
+      const appToken = await resolveDocId(args.app_token);
+      const up = await getOfficialClient().uploadMedia(args.file_path, appToken, kind);
+      return json({ fileToken: up.fileToken, viaUser: up.viaUser, parentType: kind, hint: `Pass [{ file_token: "${up.fileToken}" }] as the value of an Attachment-type Bitable field.` });
+    }
 
     // --- Official API: Bot Send / Edit / Delete ---
 
+    case 'send_card_as_user': {
+      const via = args.via || 'bot';
+      if (via === 'user') {
+        return text('send_card_as_user via="user" is not implemented in v1.3.6 — user-identity card sending requires reverse-engineering the Feishu web protobuf and is scheduled for v1.3.7. Use via="bot" (default) for now.');
+      }
+      const r = await getOfficialClient().sendMessageAsBot(args.chat_id, 'interactive', args.card);
+      return text(`Card sent (${via}): ${r.messageId}`);
+    }
     case 'send_message_as_bot': {
       const r = await getOfficialClient().sendMessageAsBot(args.chat_id, args.msg_type, args.content);
       return text(`Message sent (bot): ${r.messageId}`);
@@ -1555,10 +1779,9 @@ async function handleTool(name, args) {
     case 'create_doc_block': {
       const official = getOfficialClient();
       const docId = await resolveDocId(args.document_id);
-      // Image shortcut: if image_path or image_token is provided, orchestrate the
-      // 3-step docx image creation. Mutually exclusive with children.
+      const modes = [args.children, args.image_path, args.image_token, args.file_path, args.file_token].filter(Boolean);
+      if (modes.length > 1) return text('create_doc_block: pass exactly ONE of children / image_path / image_token / file_path / file_token.');
       if (args.image_path || args.image_token) {
-        if (args.children) return text('create_doc_block: pass children OR image_path OR image_token, not both.');
         const r = await official.createDocBlockWithImage(docId, args.parent_block_id, {
           imagePath: args.image_path,
           imageToken: args.image_token,
@@ -1566,19 +1789,29 @@ async function handleTool(name, args) {
         });
         return json(r);
       }
-      if (!args.children) return text('create_doc_block: children (generic blocks), image_path, or image_token is required.');
+      if (args.file_path || args.file_token) {
+        const r = await official.createDocBlockWithFile(docId, args.parent_block_id, {
+          filePath: args.file_path,
+          fileToken: args.file_token,
+          index: args.index,
+        });
+        return json(r);
+      }
+      if (!args.children) return text('create_doc_block: children, image_path, image_token, file_path, or file_token is required.');
       return json(await official.createDocBlock(docId, args.parent_block_id, args.children, args.index));
     }
     case 'update_doc_block': {
       const official = getOfficialClient();
       const docId = await resolveDocId(args.document_id);
-      if (args.image_token && args.update_body) {
-        return text('update_doc_block: pass image_token OR update_body, not both.');
-      }
+      const modes = [args.update_body, args.image_token, args.file_token].filter(Boolean);
+      if (modes.length > 1) return text('update_doc_block: pass exactly ONE of update_body / image_token / file_token.');
       if (args.image_token) {
         return json(await official.updateDocBlockImage(docId, args.block_id, args.image_token));
       }
-      if (!args.update_body) return text('update_doc_block: update_body or image_token is required.');
+      if (args.file_token) {
+        return json(await official.updateDocBlockFile(docId, args.block_id, args.file_token));
+      }
+      if (!args.update_body) return text('update_doc_block: update_body, image_token, or file_token is required.');
       return json(await official.updateDocBlock(docId, args.block_id, args.update_body));
     }
     case 'delete_doc_blocks':

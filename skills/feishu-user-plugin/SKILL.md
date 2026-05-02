@@ -1,8 +1,8 @@
 ---
 name: feishu-user-plugin
-version: "1.3.5"
-description: "All-in-one Feishu plugin — send messages as yourself, read group/P2P chats (auto-expands merge_forward), manage docs/tables/wiki (with wiki-node + URL transparent resolution), OKR, calendar, docx image read/write. v1.3.5: cross-process UAT refresh lock, fallback warning, download_file for chat attachments."
-allowed-tools: send_to_user, send_to_group, send_as_user, send_image_as_user, send_file_as_user, send_post_as_user, send_sticker_as_user, send_audio_as_user, search_contacts, create_p2p_chat, get_chat_info, get_user_info, get_login_status, read_p2p_messages, list_user_chats, list_chats, read_messages, reply_message, forward_message, search_docs, read_doc, create_doc, list_bitable_tables, list_bitable_fields, search_bitable_records, create_bitable_record, update_bitable_record, list_wiki_spaces, search_wiki, list_wiki_nodes, get_wiki_node, list_files, create_folder, find_user, download_image, download_file, list_user_okrs, get_okrs, list_okr_periods, list_calendars, list_calendar_events, get_calendar_event
+version: "1.3.6"
+description: "All-in-one Feishu plugin — send messages as yourself (incl. batch_send), read group/P2P chats (auto-expands merge_forward), manage docs/tables/wiki/drive (image + file blocks, drive uploads, bitable attachments), OKR, calendar, multi-profile. v1.3.6: upload completeness, sheets:spreadsheet scope, batch_send, multi-profile, send_card_as_user (bot-default)."
+allowed-tools: send_to_user, send_to_group, send_as_user, send_image_as_user, send_file_as_user, send_post_as_user, send_sticker_as_user, send_audio_as_user, batch_send, send_card_as_user, search_contacts, create_p2p_chat, get_chat_info, get_user_info, get_login_status, list_profiles, switch_profile, read_p2p_messages, list_user_chats, list_chats, read_messages, reply_message, forward_message, search_docs, read_doc, create_doc, create_doc_block, update_doc_block, list_bitable_tables, list_bitable_fields, search_bitable_records, batch_create_bitable_records, batch_update_bitable_records, upload_bitable_attachment, list_wiki_spaces, search_wiki, list_wiki_nodes, get_wiki_node, list_files, create_folder, upload_drive_file, find_user, download_image, download_file, list_user_okrs, get_okrs, list_okr_periods, list_calendars, list_calendar_events, get_calendar_event
 user_invocable: true
 ---
 
