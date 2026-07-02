@@ -2,7 +2,7 @@
   "name": "feishu-user-plugin",
   "display_name": "Feishu User Plugin for Claude Code",
   "description": "All-in-one Feishu MCP server + CLI tool for Claude Code / Codex / Cursor / scripts — 85 tools across 3 auth layers (cookie / app / OAuth). Send as you, read groups, manage docs / bitable / wiki / drive / calendar / tasks",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "icon": "https://www.feishu.cn/favicon.ico",
   "repository": {
     "type": "git",

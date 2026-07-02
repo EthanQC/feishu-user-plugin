@@ -1,6 +1,6 @@
 {
   "name": "feishu-user-plugin",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "All-in-one Feishu MCP server + CLI tool for Claude Code — send messages as yourself, read chats (auto-expanded merge_forward), manage docs / bitable / wiki (full CRUD) / drive / OKR (with progress writes) / calendar (read+write) / Tasks v2 / multi-profile auto-switch / real-time WS events. 85 tools + 9 prompts, 3 auth layers.",
   "author": {
     "name": "EthanQC"
