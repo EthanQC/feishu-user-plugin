@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-07-02
+
+一轮 v1.4.0 后全仓审计的收口补丁：修掉 setup 覆盖损坏 `~/.claude.json` 的数据丢失路径、加固进程级错误处理器的日志、补齐 v1.4.0 遗留的文档漂移（任务 scope、按 profile 事件游标）。85 工具 + 9 prompts 不变，无 breaking API。
+
+### Fixed
+- **setup 不再覆盖损坏的 `~/.claude.json`（数据丢失 guard）**：`npx feishu-user-plugin setup` 遇到既有 `~/.claude.json` 解析失败（如手改多了个逗号）或内容不是 JSON 对象（`null` / 数组 / 字面量）时，此前 `catch {}` 吞错后以 `config={}` 原子覆盖，抹掉你其它所有 `mcpServers` 条目、`projects` 历史与设置。现新增 `_readJsonConfigOrThrow`：文件不存在 / 空文件 → 安全新建；非法或非对象 JSON → 抛清晰错误并拒绝覆盖。Codex `config.toml` 读路径同样区分「文件不存在」与「权限 / IO 读失败」，后者不再当空文件覆盖。（src/config.js）
+- **进程级错误处理器有界、永不自伤日志**：`uncaughtException` / `unhandledRejection` 此前直接 `console.error(err.stack)`；抛出 / rejected 的值若不是 Error（`message` / `stack` 为 undefined），或是超大 / 循环对象，格式化本身可能在 handler 内再抛，把单次故障放大成 handler→格式化→再抛的自伤循环。现统一走 `logger.inspectError`：Error 投影为 `name` / `message` / `code` / `stack`，总输出硬封顶 8000 字符（多 key 对象与大数组也截断），任何情况不抛。落地外部 PR #110 中维护者已批准的 `util.inspect` 安全部分，不含其被 request-changes 的 SIGKILL 跨进程清理 / `ps` reaping / 重入计数。（src/logger.js、src/server.js）
+
+### Changed
+- **文档漂移收口**：`docs/TOOLS.md` / `docs/AUTH-SETUP.md` 把 v1.4.0 已拆分的任务 scope 从旧的 `task:task` 更正为 `task:task:read` / `task:task:write`（照旧文档配会 provision 到已不存在的 scope）；实时事件游标文档改为按 profile 独立的 `events.cursor.<profile>.json`（`*` / `any` 用全局游标）。`src/tools/tasks.js`、`src/clients/official/tasks.js` 的 scope 注释同步更正。ROADMAP 标题刷新到 v1.4.0+，记录 #110 安全部分已内部落地。（docs/、ROADMAP.md、src/tools/tasks.js、src/clients/official/tasks.js）
+
+### Test scenarios
+- 用一个含语法错误的 `~/.claude.json`（如尾逗号），或写入 `null` / `[]` 后跑 `setup`：应报错并保留原文件字节不变，而不是覆盖
+- 触发一次 `unhandledRejection`（reason 为超大对象）：stderr 日志应被截断到约 8 KB，且进程不崩
+
 ## [1.4.0] - 2026-06-19
 
 本版是一轮多 agent 全仓深度体检后的可靠性收口：写路径的 UAT→bot 身份漂移全部显形、多 profile 切换不再污染跨进程单点真源、实时事件按 profile 独立游标互不吞、cookie 假成功被堵、OAuth 加 state 防护、任务 scope 粒度化。85 工具 + 9 prompts 不变，无 breaking API。升级后重启 Claude Code / Codex 自动拉 v1.4.0。

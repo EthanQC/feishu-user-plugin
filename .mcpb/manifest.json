@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "feishu-user-plugin",
   "display_name": "Feishu MCP for Claude Code & Codex",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "All-in-one Feishu MCP server + CLI tool for Claude Code / Codex / Cursor / scripts — 85 tools across 3 auth layers (cookie / app / OAuth). Send as you, read groups, manage docs / bitable / wiki / drive / calendar / tasks / OKR.",
   "long_description": "feishu-user-plugin is a local stdio MCP server (and shell CLI tool) that bridges Feishu / Lark and any MCP client (Claude Code, Codex, Cursor, Windsurf, OpenClaw, Claude Desktop). It exposes 85 tools across three auth layers: cookie + protobuf for sending messages as the real user (a capability not available through the official bot API), Feishu Open Platform app credentials for groups / docs / bitable / wiki / drive / calendar / tasks / OKR, and user OAuth (UAT) for P2P chat reading and user-owned resource creation.",
   "author": {
