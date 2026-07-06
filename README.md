@@ -7,7 +7,7 @@
 [![npm](https://img.shields.io/npm/v/feishu-user-plugin.svg)](https://www.npmjs.com/package/feishu-user-plugin)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**中文** · [English](README.en.md) · [Docs](https://ethanqc.github.io/feishu-user-plugin/) · [CHANGELOG](CHANGELOG.md) · [npm](https://www.npmjs.com/package/feishu-user-plugin)
+**中文** · [English](README.en.md) · [Docs](https://zhuzhen-team.github.io/memory-system/) · [CHANGELOG](CHANGELOG.md) · [npm](https://www.npmjs.com/package/feishu-user-plugin)
 
 飞书 / Lark MCP 服务器，覆盖 IM、文档、多维表格、知识库、云空间、日历、任务 v2、OKR、实时事件。**85 工具 · 3 层鉴权 · 9 MCP prompts · MIT licensed · Node ≥18**。
 
